@@ -29,3 +29,8 @@ je-showinfilemanager==1.1.6a4
 
 # Fallback FFmpeg binary (the bundled macOS binary is x86-64 only)
 imageio-ffmpeg
+
+# Web UI (python -m webapp)
+fastapi
+uvicorn
+python-multipart

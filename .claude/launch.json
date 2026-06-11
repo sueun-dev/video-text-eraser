@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "video-text-eraser",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "webapp"],
+      "port": 8766,
+      "env": { "PORT": "8766", "PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK": "True" }
+    }
+  ]
+}

@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Video Text Eraser</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #181b22; --panel2: #1f232c; --border: #2a2f3a;
+    --text: #e6e9ef; --muted: #8b93a3; --accent: #4f8cff; --accent2: #7c5cff;
+    --ok: #2ecc71; --warn: #f1c40f; --err: #e74c3c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font-family: -apple-system, "Apple SD Gothic Neo", "Pretendard", sans-serif; }
+  header { padding: 18px 28px; border-bottom: 1px solid var(--border);
+           display: flex; align-items: baseline; gap: 14px; }
+  header h1 { font-size: 20px; font-weight: 700;
+              background: linear-gradient(90deg, var(--accent), var(--accent2));
+              -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  header span { color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 360px 1fr; gap: 18px;
+         padding: 18px 28px; max-width: 1500px; margin: 0 auto; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 14px; margin-bottom: 12px; color: var(--text); }
+  .card h2 .step { display: inline-block; width: 22px; height: 22px; line-height: 22px;
+                   text-align: center; border-radius: 50%; background: var(--accent);
+                   color: #fff; font-size: 12px; margin-right: 8px; }
+  .muted { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+           border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: linear-gradient(90deg, var(--accent), var(--accent2));
+                   border: none; font-weight: 700; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input, select { background: var(--panel2); border: 1px solid var(--border);
+                  color: var(--text); border-radius: 8px; padding: 7px 10px;
+                  font-size: 13px; width: 100%; }
+  label { font-size: 12px; color: var(--muted); display: block; margin: 8px 0 4px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row > * { flex: 1; }
+  #drop { border: 2px dashed var(--border); border-radius: 12px; padding: 34px 10px;
+          text-align: center; color: var(--muted); cursor: pointer; transition: .2s; }
+  #drop.hover { border-color: var(--accent); color: var(--accent); }
+  #meta { margin-top: 10px; font-size: 12px; color: var(--muted); }
+  #canvasWrap { position: relative; background: #000; border-radius: 10px;
+                overflow: hidden; min-height: 220px; }
+  #canvas { display: block; width: 100%; cursor: crosshair; }
+  #frameRow { display: flex; gap: 10px; align-items: center; margin-top: 10px; }
+  #frameRow input[type=range] { flex: 1; }
+  #frameNo { font-size: 12px; color: var(--muted); min-width: 90px; text-align: right; }
+  .boxlist { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .boxitem { display: flex; justify-content: space-between; align-items: center;
+             background: var(--panel2); padding: 6px 10px; border-radius: 8px;
+             font-size: 12px; border: 1px solid var(--border); }
+  .boxitem button { padding: 2px 8px; font-size: 11px; }
+  .modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .mode { border: 1px solid var(--border); border-radius: 10px; padding: 10px;
+          cursor: pointer; font-size: 12px; }
+  .mode b { display: block; font-size: 13px; margin-bottom: 3px; }
+  .mode.sel { border-color: var(--accent); background: rgba(79,140,255,.08); }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 20px;
+           font-size: 11px; margin-top: 8px; }
+  .badge.ok { background: rgba(46,204,113,.15); color: var(--ok); }
+  .badge.warn { background: rgba(241,196,15,.12); color: var(--warn); }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; font-size: 13px; color: var(--accent); padding: 4px 0; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #progressWrap { display: none; margin-top: 12px; }
+  #bar { height: 10px; background: var(--panel2); border-radius: 6px; overflow: hidden; }
+  #fill { height: 100%; width: 0%; border-radius: 6px;
+          background: linear-gradient(90deg, var(--accent), var(--accent2)); transition: .4s; }
+  #log { margin-top: 8px; font-family: ui-monospace, monospace; font-size: 11px;
+         color: var(--muted); white-space: pre-wrap; max-height: 110px; overflow-y: auto; }
+  #resultWrap { display: none; }
+  #resultGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  #resultGrid video, #resultGrid img { width: 100%; border-radius: 10px; background: #000; }
+  #resultGrid .cap { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: var(--panel2); border: 1px solid var(--border); color: var(--text);
+           padding: 10px 18px; border-radius: 10px; font-size: 13px; display: none; z-index: 99; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Video Text Eraser</h1>
+  <span>영상·이미지 속 자막 / 워터마크 / 로고 AI 제거 — 100% 로컬 처리</span>
+</header>
+
+<main>
+  <!-- ============ LEFT: controls ============ -->
+  <div>
+    <div class="card">
+      <h2><span class="step">1</span>파일 업로드</h2>
+      <div id="drop">영상/이미지를 끌어놓거나 클릭해서 선택<br>
+        <span style="font-size:11px">mp4 · mov · mkv · avi · jpg · png …</span></div>
+      <input type="file" id="fileInput" hidden accept="video/*,image/*">
+      <div id="meta"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">2</span>제거 영역</h2>
+      <div class="muted">미리보기에서 드래그하여 박스를 그리세요. 박스가 없으면 화면 전체를 검사합니다.</div>
+      <div class="row" style="margin-top:10px">
+        <button id="btnOcr" disabled>OCR 텍스트 자동탐지</button>
+        <button id="btnClear" disabled>박스 모두 지우기</button>
+      </div>
+      <details>
+        <summary>AI 자동탐지 (Claude / OpenAI) — 그래픽 로고까지</summary>
+        <label>제공자</label>
+        <div class="row">
+          <select id="aiProvider">
+            <option value="claude">Claude (Anthropic)</option>
+            <option value="openai">OpenAI</option>
+          </select>
+          <select id="aiTarget">
+            <option value="both">텍스트+로고</option>
+            <option value="text">텍스트만</option>
+            <option value="logo">로고만</option>
+          </select>
+        </div>
+        <label>모델 (비우면 기본값: claude-sonnet-4-6 / gpt-4o)</label>
+        <input id="aiModel" placeholder="claude-sonnet-4-6">
+        <label>API 키 <span style="color:var(--muted)">(브라우저 localStorage에만 저장, localhost로만 전송)</span></label>
+        <input id="aiKey" type="password" placeholder="sk-ant-... 또는 sk-...">
+        <button id="btnAi" disabled style="margin-top:10px;width:100%">AI로 영역 탐지</button>
+      </details>
+      <div class="boxlist" id="boxList"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">3</span>제거 방식</h2>
+      <div class="modes" id="modes">
+        <div class="mode sel" data-mode="sttn-auto"><b>STTN 자동</b>움직이는 자막에 최적 · 빠름 · OCR 생략</div>
+        <div class="mode" data-mode="sttn-det"><b>STTN 정밀</b>OCR 검출 기반 · 자막 프레임만 수정</div>
+        <div class="mode" data-mode="lama-region"><b>LaMa 영역</b>고정 워터마크/로고 제거 · 프레임별 복원</div>
+        <div class="mode" data-mode="lama"><b>LaMa 검출</b>애니·이미지 · OCR 기반</div>
+        <div class="mode" data-mode="propainter"><b>ProPainter</b>격렬한 움직임 · 고품질 · 느림</div>
+        <div class="mode" data-mode="opencv"><b>OpenCV</b>미리보기용 · 최저 품질</div>
+      </div>
+      <button id="btnAnalyze" disabled style="margin-top:10px;width:100%">선택 영역 분석 → 모드 추천</button>
+      <div id="recommend"></div>
+      <details>
+        <summary>고급 설정</summary>
+        <div class="grid2">
+          <div><label>마스크 여유(px)</label><input id="sMaskPad" type="number" value="10"></div>
+          <div><label>경계 페더(px, LaMa영역)</label><input id="sFeather" type="number" value="12"></div>
+          <div><label>STTN 이웃 간격</label><input id="sStride" type="number" value="5"></div>
+          <div><label>STTN 참조 길이</label><input id="sRef" type="number" value="10"></div>
+          <div><label>STTN 최대 로드</label><input id="sMaxLoad" type="number" value="50"></div>
+          <div><label>ProPainter 최대 로드</label><input id="sPpLoad" type="number" value="70"></div>
+          <div><label>타임라인 앞 확장</label><input id="sBack" type="number" value="3"></div>
+          <div><label>타임라인 뒤 확장</label><input id="sFwd" type="number" value="3"></div>
+          <div><label>OCR 모델</label>
+            <select id="sDetModel"><option value="server">정밀(server)</option>
+              <option value="mobile">빠름(mobile)</option></select></div>
+          <div><label>하드웨어 가속</label>
+            <select id="sHw"><option value="true">켜기</option><option value="false">끄기</option></select></div>
+        </div>
+      </details>
+    </div>
+
+    <div class="card">
+      <h2><span class="step">4</span>실행</h2>
+      <button id="btnRun" class="primary" disabled style="width:100%;padding:12px">제거 시작</button>
+      <div id="progressWrap">
+        <div id="bar"><div id="fill"></div></div>
+        <div class="muted" id="pct" style="margin-top:6px">0%</div>
+        <div id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ RIGHT: preview & result ============ -->
+  <div>
+    <div class="card">
+      <h2>미리보기 · 영역 선택</h2>
+      <div id="canvasWrap"><canvas id="canvas"></canvas></div>
+      <div id="frameRow" style="display:none">
+        <input type="range" id="frameSlider" min="0" value="0">
+        <span id="frameNo"></span>
+      </div>
+    </div>
+    <div class="card" id="resultWrap">
+      <h2>결과</h2>
+      <div class="row">
+        <a id="btnDownload" download><button class="primary" style="width:100%">다운로드</button></a>
+      </div>
+      <div id="resultGrid"></div>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = { fileId:null, kind:null, meta:null, frame:0, boxes:[], img:new Image(),
+                mode:'sttn-auto', job:null, selected:-1 };
+
+function toast(msg, ms=3200){ const t=$('toast'); t.textContent=msg;
+  t.style.display='block'; clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',ms); }
+
+/* ---------- upload ---------- */
+$('drop').onclick = () => $('fileInput').click();
+$('drop').ondragover = e => { e.preventDefault(); $('drop').classList.add('hover'); };
+$('drop').ondragleave = () => $('drop').classList.remove('hover');
+$('drop').ondrop = e => { e.preventDefault(); $('drop').classList.remove('hover');
+  if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]); };
+$('fileInput').onchange = e => e.target.files[0] && uploadFile(e.target.files[0]);
+
+async function uploadFile(file){
+  $('drop').textContent = '업로드 중… ' + file.name;
+  const fd = new FormData(); fd.append('file', file);
+  const res = await fetch('/api/upload', {method:'POST', body:fd});
+  if (!res.ok){ toast('업로드 실패: ' + (await res.text())); resetDrop(); return; }
+  const d = await res.json();
+  state.fileId = d.file_id; state.kind = d.kind; state.meta = d;
+  state.frame = 0; state.boxes = []; state.selected = -1;
+  $('meta').innerHTML = `<b>${file.name}</b> · ${d.width}×${d.height}` +
+    (d.kind==='video' ? ` · ${d.fps}fps · ${d.frames}프레임 (${d.duration}s)` : ' · 이미지');
+  resetDrop();
+  ['btnOcr','btnClear','btnAi','btnAnalyze','btnRun'].forEach(i=>$(i).disabled=false);
+  if (d.kind==='video'){ $('frameRow').style.display='flex';
+    $('frameSlider').max = d.frames-1; $('frameSlider').value = 0; }
+  else $('frameRow').style.display='none';
+  loadFrame();
+}
+function resetDrop(){ $('drop').innerHTML =
+  '영상/이미지를 끌어놓거나 클릭해서 선택<br><span style="font-size:11px">mp4 · mov · mkv · avi · jpg · png …</span>'; }
+
+/* ---------- frame preview ---------- */
+let frameTimer=null;
+$('frameSlider').oninput = e => { state.frame = +e.target.value;
+  $('frameNo').textContent = `${state.frame+1} / ${state.meta.frames}`;
+  clearTimeout(frameTimer); frameTimer = setTimeout(loadFrame, 120); };
+
+function loadFrame(){
+  if (!state.fileId) return;
+  state.img.onload = draw;
+  state.img.src = `/api/frame/${state.fileId}?index=${state.frame}&width=1280&_=${Date.now()}`;
+  $('frameNo').textContent = state.kind==='video' ? `${state.frame+1} / ${state.meta.frames}` : '';
+}
+
+const cv = $('canvas'), ctx = cv.getContext('2d');
+function draw(){
+  cv.width = state.img.naturalWidth; cv.height = state.img.naturalHeight;
+  ctx.drawImage(state.img, 0, 0);
+  state.boxes.forEach((b,i)=>{
+    const x=b.xmin*cv.width, y=b.ymin*cv.height,
+          w=(b.xmax-b.xmin)*cv.width, h=(b.ymax-b.ymin)*cv.height;
+    ctx.lineWidth = i===state.selected?4:2.5;
+    ctx.strokeStyle = i===state.selected?'#7c5cff':'#4f8cff';
+    ctx.fillStyle = 'rgba(79,140,255,.13)';
+    ctx.fillRect(x,y,w,h); ctx.strokeRect(x,y,w,h);
+    ctx.font = 'bold 15px sans-serif'; ctx.fillStyle = '#9db9ff';
+    ctx.fillText(`${i+1}. ${b.label||'영역'}`, x+5, y-6 < 14 ? y+18 : y-6);
+  });
+  renderBoxList();
+}
+
+/* ---------- box drawing ---------- */
+let drag=null;
+function evtPos(e){ const r=cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)/r.width, y:(e.clientY-r.top)/r.height }; }
+cv.onmousedown = e => { if(!state.fileId) return; drag = evtPos(e); };
+cv.onmousemove = e => { if(!drag) return; const p=evtPos(e); draw();
+  const x=Math.min(drag.x,p.x)*cv.width, y=Math.min(drag.y,p.y)*cv.height;
+  ctx.setLineDash([6,4]); ctx.strokeStyle='#f1c40f'; ctx.lineWidth=2;
+  ctx.strokeRect(x,y,Math.abs(p.x-drag.x)*cv.width,Math.abs(p.y-drag.y)*cv.height);
+  ctx.setLineDash([]); };
+cv.onmouseup = e => {
+  if(!drag) return; const p=evtPos(e);
+  const box = { label:'수동 영역', kind:'manual',
+    ymin:Math.max(0,Math.min(drag.y,p.y)), ymax:Math.min(1,Math.max(drag.y,p.y)),
+    xmin:Math.max(0,Math.min(drag.x,p.x)), xmax:Math.min(1,Math.max(drag.x,p.x)) };
+  drag=null;
+  if ((box.ymax-box.ymin)*cv.height>8 && (box.xmax-box.xmin)*cv.width>8){
+    state.boxes.push(box); state.selected = state.boxes.length-1; }
+  draw(); };
+document.onkeydown = e => { if(e.key==='Delete'||e.key==='Backspace'){
+  if(state.selected>=0 && document.activeElement.tagName!=='INPUT'){
+    state.boxes.splice(state.selected,1); state.selected=-1; draw(); } } };
+
+function renderBoxList(){
+  $('boxList').innerHTML = state.boxes.length ? '' :
+    '<div class="muted">선택된 영역 없음 → 전체 화면 검사</div>';
+  state.boxes.forEach((b,i)=>{
+    const div=document.createElement('div'); div.className='boxitem';
+    div.innerHTML=`<span>${i+1}. ${b.label} <span style="color:var(--muted)">(${b.kind})</span></span>`;
+    const del=document.createElement('button'); del.textContent='✕';
+    del.onclick=()=>{ state.boxes.splice(i,1); state.selected=-1; draw(); };
+    div.appendChild(del); div.onclick=e=>{ if(e.target!==del){ state.selected=i; draw(); } };
+    $('boxList').appendChild(div); });
+}
+$('btnClear').onclick = ()=>{ state.boxes=[]; state.selected=-1; draw(); };
+
+/* ---------- detection ---------- */
+$('btnOcr').onclick = async ()=>{
+  $('btnOcr').disabled=true; $('btnOcr').textContent='탐지 중…';
+  try{
+    const res=await fetch('/api/detect/ocr',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file_id:state.fileId, frame_index:state.frame})});
+    if(!res.ok) throw new Error(await res.text());
+    const d=await res.json();
+    if(!d.boxes.length) toast('이 프레임에서 텍스트를 찾지 못했습니다');
+    state.boxes.push(...d.boxes); draw();
+  }catch(e){ toast('OCR 실패: '+e.message); }
+  $('btnOcr').disabled=false; $('btnOcr').textContent='OCR 텍스트 자동탐지'; };
+
+['aiKey','aiModel'].forEach(id=>{
+  $(id).value = localStorage.getItem('vte_'+id+'_'+($('aiProvider').value))||'';
+});
+$('aiProvider').onchange = ()=>{ ['aiKey','aiModel'].forEach(id=>{
+  $(id).value = localStorage.getItem('vte_'+id+'_'+$('aiProvider').value)||''; }); };
+
+$('btnAi').onclick = async ()=>{
+  const key=$('aiKey').value.trim();
+  if(!key) return toast('API 키를 입력하세요');
+  localStorage.setItem('vte_aiKey_'+$('aiProvider').value, key);
+  localStorage.setItem('vte_aiModel_'+$('aiProvider').value, $('aiModel').value.trim());
+  $('btnAi').disabled=true; $('btnAi').textContent='AI 탐지 중…';
+  try{
+    const res=await fetch('/api/detect/ai',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file_id:state.fileId, frame_index:state.frame,
+        provider:$('aiProvider').value, api_key:key,
+        model:$('aiModel').value.trim()||null, target:$('aiTarget').value})});
+    if(!res.ok) throw new Error((await res.json()).detail||res.status);
+    const d=await res.json();
+    if(!d.boxes.length) toast('AI가 오버레이를 찾지 못했습니다');
+    state.boxes.push(...d.boxes); draw();
+  }catch(e){ toast('AI 탐지 실패: '+e.message, 5000); }
+  $('btnAi').disabled=false; $('btnAi').textContent='AI로 영역 탐지'; };
+
+/* ---------- mode & analyze ---------- */
+document.querySelectorAll('.mode').forEach(el=>{
+  el.onclick=()=>{ document.querySelectorAll('.mode').forEach(m=>m.classList.remove('sel'));
+    el.classList.add('sel'); state.mode=el.dataset.mode; }; });
+
+$('btnAnalyze').onclick = async ()=>{
+  if(!state.boxes.length) return toast('먼저 영역을 선택하세요');
+  $('btnAnalyze').disabled=true;
+  try{
+    const res=await fetch('/api/analyze',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file_id:state.fileId,
+        areas:state.boxes.map(b=>[b.ymin,b.ymax,b.xmin,b.xmax])})});
+    const d=await res.json();
+    $('recommend').innerHTML = `<span class="badge ${d.static?'warn':'ok'}">추천: ${d.recommended_mode}</span>
+      <div class="muted" style="margin-top:6px">${d.reason}</div>`;
+    document.querySelectorAll('.mode').forEach(m=>{
+      m.classList.toggle('sel', m.dataset.mode===d.recommended_mode); });
+    state.mode = d.recommended_mode;
+  }catch(e){ toast('분석 실패: '+e.message); }
+  $('btnAnalyze').disabled=false; };
+
+/* ---------- run & poll ---------- */
+function settings(){ return {
+  maskPadding:+$('sMaskPad').value, feather:+$('sFeather').value,
+  sttnNeighborStride:+$('sStride').value, sttnReferenceLength:+$('sRef').value,
+  sttnMaxLoadNum:+$('sMaxLoad').value, propainterMaxLoadNum:+$('sPpLoad').value,
+  timelineBackward:+$('sBack').value, timelineForward:+$('sFwd').value,
+  detectModel:$('sDetModel').value, hardwareAcceleration:$('sHw').value==='true' }; }
+
+$('btnRun').onclick = async ()=>{
+  $('btnRun').disabled=true; $('progressWrap').style.display='block';
+  $('resultWrap').style.display='none'; $('fill').style.width='0%'; $('log').textContent='';
+  try{
+    const res=await fetch('/api/process',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({file_id:state.fileId, mode:state.mode,
+        areas:state.boxes.map(b=>[b.ymin,b.ymax,b.xmin,b.xmax]), settings:settings()})});
+    if(!res.ok) throw new Error((await res.json()).detail||res.status);
+    state.job=(await res.json()).job_id; poll();
+  }catch(e){ toast('실행 실패: '+e.message,5000); $('btnRun').disabled=false; } };
+
+async function poll(){
+  const res=await fetch('/api/job/'+state.job); const d=await res.json();
+  $('fill').style.width=d.progress+'%'; $('pct').textContent=d.progress+'% — '+d.status;
+  $('log').textContent=(d.log||[]).join('\n'); $('log').scrollTop=$('log').scrollHeight;
+  if(d.status==='done'){ $('btnRun').disabled=false; showResult(d.result_url); return; }
+  if(d.status==='error'){ $('btnRun').disabled=false; toast('실패: '+d.error,6000); return; }
+  setTimeout(poll, 1000); }
+
+function showResult(url){
+  $('resultWrap').style.display='block';
+  $('btnDownload').href=url;
+  const isVideo = state.kind==='video';
+  const src = `/api/source/${state.fileId}`;
+  $('resultGrid').innerHTML =
+    `<div><div class="cap">원본</div>${ isVideo
+        ? `<video controls muted src="${src}"></video>` : `<img src="${src}">` }</div>` +
+    `<div><div class="cap">결과</div>${ isVideo
+        ? `<video controls muted src="${url}"></video>` : `<img src="${url}">` }</div>`;
+  window.scrollTo({top:document.body.scrollHeight, behavior:'smooth'}); }
+</script>
+</body>
+</html>
