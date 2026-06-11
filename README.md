@@ -1,112 +1,124 @@
 # Video Text Eraser
 
-AI-powered removal of hard-coded subtitles and text watermarks from videos and images — fully local, no third-party APIs.
+영상과 이미지에 박혀 있는(하드코딩된) 자막·텍스트 워터마크를 AI로 지우는 도구입니다.
+서드파티 API 없이 **전부 로컬에서** 동작하며, Apple Silicon에 네이티브로 대응합니다.
 
-> **Attribution** — This project is a refactored fork of
+> **출처 (Attribution)** — 이 프로젝트는
 > [YaoFANGUK/video-subtitle-remover](https://github.com/YaoFANGUK/video-subtitle-remover)
-> (Apache License 2.0). All credit for the original architecture, models, and
-> GUI goes to the upstream author. See [What's different](#whats-different)
-> for the changes made in this fork.
+> (Apache License 2.0)를 리팩토링한 포크입니다. 원본의 아키텍처·모델·GUI에 대한
+> 모든 공로는 원작자에게 있습니다. 이 포크에서 바뀐 점은
+> [원본 대비 변경점](#원본-대비-변경점)을 참고하세요.
 
-## How it works
+## 동작 원리
 
 ```
-video ──▶ text detection (PaddleOCR, sampled + interpolated)
-              │
-        frame-run grouping (same mask, scene-cut aware)
-              │
-        mask → full-width band extraction (only the band is processed)
-              │
-        AI inpainting (STTN / LaMa / ProPainter)
-              │
-        x264 encode + original audio merged back
+영상 ──▶ 텍스트 검출 (PaddleOCR, 샘플링 + 보간)
+            │
+       연속 구간 묶기 (동일 마스크 단위, 장면 전환 인식)
+            │
+       마스크 → 전체 너비 밴드 추출 (밴드 부분만 처리)
+            │
+       AI 인페인팅 (STTN / LaMa / ProPainter)
+            │
+       x264 인코딩 + 원본 오디오 재병합
 ```
 
-The key idea: hard subtitles change or disappear over time, so the background
-behind them is visible in *other* frames. The temporal models (STTN,
-ProPainter) attend to neighbouring and far-away reference frames to
-reconstruct the true background instead of hallucinating it.
+핵심 아이디어는 이렇습니다. 하드 자막은 시간이 지나면 바뀌거나 사라지므로,
+자막 뒤에 가려진 배경은 **다른 프레임에서는 드러나** 있습니다. 시간축 기반
+모델(STTN, ProPainter)은 인접 프레임과 멀리 떨어진 참조 프레임을 함께 보고
+배경을 *지어내는* 대신 실제 배경을 복원합니다.
 
-| Mode | Best for | Notes |
-|------|----------|-------|
-| `sttn-auto` (default) | live-action, speed | no OCR pass; erases the selected area in every frame |
-| `sttn-det` | live-action, precision | OCR-driven; only touches frames that contain text |
-| `lama` | animation, still images | single-frame model, no temporal context |
-| `propainter` | violent camera motion | optical-flow based, heavy VRAM use |
-| `opencv` | quick preview | classical Telea inpainting, lowest quality |
+| 모드 | 적합한 대상 | 특징 |
+|------|-----------|------|
+| `sttn-auto` (기본값) | 실사 영상, 속도 우선 | OCR 생략; 선택 영역을 모든 프레임에서 제거 |
+| `sttn-det` | 실사 영상, 정밀도 우선 | OCR 기반; 텍스트가 있는 프레임만 건드림 |
+| `lama` | 애니메이션, 정지 이미지 | 단일 프레임 모델, 시간축 정보 없음 |
+| `propainter` | 카메라 움직임이 격렬한 영상 | 광학 흐름 기반, VRAM 사용량 큼 |
+| `opencv` | 빠른 미리보기 | 고전적 Telea 인페인팅, 품질 최하 |
 
-## What's different
+## 원본 대비 변경점
 
-Compared to upstream, this fork:
+업스트림과 비교해 이 포크는 다음을 개선했습니다.
 
-- **Refactored the entire core pipeline** (`backend/main.py`, detection,
-  mask/band utilities, all five inpaint wrappers) — typed, documented,
-  lint-clean, with the 200-line band-extraction routine decomposed into
-  testable helpers.
-- **Fixed six real bugs**, including two ProPainter-mode frame bugs (frames
-  silently dropped from the output; wrong frame inpainted for single-frame
-  batches), a CLI crash when `-o` was omitted, and a PaddleOCR failure when
-  high-performance inference plugins are missing.
-- **Runs natively on Apple Silicon** — torch MPS acceleration plus an FFmpeg
-  resolution chain (bundled → PATH → `imageio-ffmpeg`) that fixes broken
-  audio merging caused by the bundled x86-64-only binary.
-- **Ships an end-to-end verification harness** (`test/verify_removal.py`)
-  that proves a run removed *exactly* the subtitles: OCR re-detection must
-  drop to zero, and pixels outside the inpaint band must be identical to the
-  original up to a measured codec-noise baseline.
+- **코어 파이프라인 전면 리팩토링** (`backend/main.py`, 자막 검출,
+  마스크/밴드 유틸리티, 5종 인페인팅 래퍼 전부) — 타입 힌트·문서화·린트 클린
+  처리했고, 200줄짜리 밴드 추출 루틴을 테스트 가능한 헬퍼들로 분해했습니다.
+- **실제 버그 6건 수정** — ProPainter 모드의 프레임 버그 2건(출력에서
+  프레임이 조용히 누락되던 문제, 단일 프레임 배치에서 엉뚱한 프레임이
+  인페인트되던 문제), `-o` 미지정 시 CLI 크래시, 고성능 추론(HPI) 플러그인이
+  없을 때 PaddleOCR가 전체 실패하던 문제 등이 포함됩니다.
+- **Apple Silicon 네이티브 지원** — torch MPS 가속과 함께, 번들된 x86-64
+  전용 바이너리 때문에 깨지던 오디오 병합을 고치는 FFmpeg 탐색 체인
+  (번들 → PATH → `imageio-ffmpeg`)을 구현했습니다.
+- **E2E 검증 하네스 동봉** (`test/verify_removal.py`) — "자막만 정확히
+  지웠는지"를 증명합니다. OCR 재검출이 0으로 떨어져야 하고, 인페인트 밴드
+  바깥의 픽셀은 측정된 코덱 노이즈 기준 내에서 원본과 동일해야 통과합니다.
 
-## Install
+## 설치
 
-Requires Python 3.10+ (3.12 recommended).
+Python 3.10 이상이 필요합니다 (3.12 권장).
 
 ```bash
 python3.12 -m venv .venv
 .venv/bin/pip install -r requirements.txt torch torchvision paddlepaddle
-# NVIDIA GPU: install the CUDA builds of torch/paddlepaddle instead.
+# NVIDIA GPU 사용 시: torch/paddlepaddle의 CUDA 빌드를 대신 설치하세요.
 ```
 
-Model weights (~600 MB) are bundled in `backend/models/`.
+모델 가중치(약 600MB)는 `backend/models/`에 함께 포함되어 있습니다.
 
-## Usage
+## 사용법
 
-CLI:
+**CLI:**
 
 ```bash
 .venv/bin/python backend/main.py \
   -i input.mp4 -o output.mp4 \
   --inpaint-mode sttn-det \
-  -c 340 480 0 852          # subtitle area: ymin ymax xmin xmax (optional)
+  -c 340 480 0 852          # 자막 영역: ymin ymax xmin xmax (생략 가능)
 ```
 
-GUI:
+`-c` 옵션을 생략하면 화면 전체를 대상으로 처리합니다. 자막 위치를 알고 있다면
+영역을 지정하는 편이 더 빠르고 정확합니다.
+
+**GUI:**
 
 ```bash
 .venv/bin/python gui.py
 ```
 
-Verify a result:
+**결과 검증:**
 
 ```bash
 .venv/bin/python test/verify_removal.py input.mp4 output.mp4
 ```
 
-## License
+## 인자 옵션
 
-[Apache License 2.0](LICENSE) — same as the upstream project it derives from.
+| 인자 | 설명 |
+|------|------|
+| `-i`, `--input` | 입력 영상/이미지 경로 (필수) |
+| `-o`, `--output` | 출력 경로 (생략 시 `<이름>_no_sub.mp4`) |
+| `-c`, `--subtitle-area-coords` | 자막 영역 `ymin ymax xmin xmax`, 여러 번 지정 가능 |
+| `--inpaint-mode` | `sttn-auto`(기본)·`sttn-det`·`lama`·`propainter`·`opencv` |
+
+## 라이선스
+
+[Apache License 2.0](LICENSE) — 이 프로젝트가 파생된 원본과 동일합니다.
 
 ---
 
-## 한국어 안내
+## English
 
-영상/이미지에 박힌(하드코딩된) 자막·텍스트 워터마크를 AI로 지우는 도구입니다.
-서드파티 API 없이 전부 로컬에서 동작합니다.
+AI-powered removal of hard-coded subtitles and text watermarks from videos and
+images — fully local, no third-party APIs, native on Apple Silicon.
 
-이 프로젝트는 [YaoFANGUK/video-subtitle-remover](https://github.com/YaoFANGUK/video-subtitle-remover)
-(Apache 2.0)를 기반으로 한 포크이며, 다음이 다릅니다:
+This project is a refactored fork of
+[YaoFANGUK/video-subtitle-remover](https://github.com/YaoFANGUK/video-subtitle-remover)
+(Apache 2.0). Changes vs upstream:
 
-- 코어 파이프라인 전면 리팩토링 (타입힌트·문서화·린트 클린)
-- 실제 버그 6건 수정 (ProPainter 프레임 유실 등)
-- **Apple Silicon 네이티브 지원** (MPS 가속 + arm64 FFmpeg 자동 해결)
-- "자막만 정확히 지웠는지" 증명하는 E2E 검증 스크립트 동봉
+- Full refactor of the core pipeline (typed, documented, lint-clean)
+- Six real bug fixes (ProPainter frame loss, CLI crash, OCR fallback, …)
+- Native Apple Silicon support (torch MPS + arm64 FFmpeg resolution)
+- An end-to-end verification harness proving only the subtitles were erased
 
-사용법은 위 [Usage](#usage) 섹션과 동일합니다.
+See the [Usage](#사용법) section above; the commands are identical.
