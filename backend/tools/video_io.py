@@ -84,6 +84,8 @@ class FFmpegVideoWriter:
         """Write one frame (a numpy BGR array)."""
         if frame.dtype != np.uint8:
             frame = np.clip(frame, 0, 255).astype(np.uint8)
+        if self._process.stdin is None:
+            return
         try:
             self._process.stdin.write(frame.tobytes())
         except BrokenPipeError:
@@ -92,7 +94,8 @@ class FFmpegVideoWriter:
     def release(self):
         """Close the pipe and wait for encoding to finish."""
         try:
-            self._process.stdin.close()
+            if self._process.stdin is not None:
+                self._process.stdin.close()
         except BrokenPipeError:
             pass
         try:
@@ -121,6 +124,5 @@ def make_video_writer(output_path, fps, size):
             return FFmpegVideoWriter(output_path, fps, size)
         except Exception:
             pass
-    return cv2.VideoWriter(
-        output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size
-    )
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")  # type: ignore[attr-defined]  # cv2 stub gap
+    return cv2.VideoWriter(output_path, fourcc, fps, size)

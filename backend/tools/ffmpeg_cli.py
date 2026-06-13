@@ -51,7 +51,7 @@ class FFmpegCLI:
             return bundled
 
         on_path = shutil.which("ffmpeg")
-        if _runs(on_path):
+        if on_path and _runs(on_path):
             return on_path
 
         try:

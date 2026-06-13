@@ -9,7 +9,7 @@ Highest quality on fast motion, but also the most memory-hungry mode.
 import gc
 import os
 import warnings
-from typing import List, Tuple
+from typing import List, Tuple, cast
 
 import cv2
 import numpy as np
@@ -29,6 +29,11 @@ warnings.filterwarnings("ignore")
 _BAND_HEIGHT_RATIO = 3 / 16
 # ProPainter's architecture requires band dimensions divisible by 8.
 _SIZE_MULTIPLE = 8
+
+
+def _stack_tensor(items) -> torch.Tensor:
+    """Stack a list of PIL images into one tensor (typed wrapper over to_tensors())."""
+    return to_tensors()(items)
 
 
 def _prepare_masks(
@@ -111,7 +116,8 @@ class PropainterInpaint:
         # RAFT refinement iterations.
         self.raft_iter = 20
 
-        self.fix_raft = RAFT_bi(os.path.join(model_dir, "raft-things.pth"), device)
+        # RAFT_bi's vendored signature mistypes device as str; it accepts a torch.device.
+        self.fix_raft = RAFT_bi(os.path.join(model_dir, "raft-things.pth"), device)  # type: ignore[arg-type]
         self.fix_flow_complete = self._load_flow_completion_model()
         self.model = self._load_inpaint_model()
 
@@ -134,33 +140,31 @@ class PropainterInpaint:
     def inpaint(self, frames: List[np.ndarray], mask: np.ndarray) -> List[np.ndarray]:
         """Restore one band crop across a run of frames. Returns BGR arrays."""
         if isinstance(frames[0], np.ndarray):
-            frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
-        size = frames[0].size
-        flow_masks, masks_dilated = _prepare_masks(
-            mask, len(frames),
+            pil_frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]
+        else:
+            pil_frames = cast(List[Image.Image], list(frames))
+        w, h = pil_frames[0].size
+        flow_mask_imgs, mask_imgs = _prepare_masks(
+            mask, len(pil_frames),
             flow_mask_dilates=self.mask_dilation, mask_dilates=self.mask_dilation,
         )
-        w, h = size
 
-        frames_inp = [np.array(f).astype(np.uint8) for f in frames]
-        frames = to_tensors()(frames).unsqueeze(0) * 2 - 1
-        flow_masks = to_tensors()(flow_masks).unsqueeze(0)
-        masks_dilated = to_tensors()(masks_dilated).unsqueeze(0)
-        frames = frames.to(self.device)
-        flow_masks = flow_masks.to(self.device)
-        masks_dilated = masks_dilated.to(self.device)
-        video_length = frames.size(1)
+        frames_inp = [np.array(f).astype(np.uint8) for f in pil_frames]
+        frames_t = (_stack_tensor(pil_frames).unsqueeze(0) * 2 - 1).to(self.device)
+        flow_masks = _stack_tensor(flow_mask_imgs).unsqueeze(0).to(self.device)
+        masks_dilated = _stack_tensor(mask_imgs).unsqueeze(0).to(self.device)
+        video_length = frames_t.size(1)
 
         with torch.no_grad():
-            gt_flows_bi = self._compute_flow(frames, video_length)
+            gt_flows_bi = self._compute_flow(frames_t, video_length)
             if self.use_half:
-                frames = frames.half()
+                frames_t = frames_t.half()
                 flow_masks = flow_masks.half()
                 masks_dilated = masks_dilated.half()
                 gt_flows_bi = (gt_flows_bi[0].half(), gt_flows_bi[1].half())
             pred_flows_bi = self._complete_flow(gt_flows_bi, flow_masks)
             updated_frames, updated_masks = self._propagate_images(
-                frames, masks_dilated, pred_flows_bi, video_length, h, w
+                frames_t, masks_dilated, pred_flows_bi, video_length, h, w
             )
 
         return self._run_transformer(

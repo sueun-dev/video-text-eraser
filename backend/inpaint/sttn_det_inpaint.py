@@ -6,7 +6,7 @@ frames. Unlike the auto mode, the mask is fed to the network so pixels outside
 the mask are preserved exactly.
 """
 
-from typing import List
+from typing import List, Optional, cast
 
 import cv2
 import numpy as np
@@ -18,7 +18,12 @@ from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 from backend.tools.inpaint_tools import get_inpaint_area_by_mask
 
-_to_tensors = transforms.Compose([Stack(), ToTorchFormatTensor()])
+_compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
+
+
+def _to_tensors(frames) -> torch.Tensor:
+    """Stack frames into a single normalized tensor (typed wrapper over Compose)."""
+    return _compose(frames)
 
 # Input resolution expected by the pretrained detection-mode checkpoint.
 _MODEL_INPUT_WIDTH = 432
@@ -98,7 +103,7 @@ class STTNDetInpaint:
         ]
         masks_tensor = (_to_tensors(masks).unsqueeze(0) > 0.5).float().to(self.device)
 
-        completed: List[np.ndarray] = [None] * frame_length
+        completed: List[Optional[np.ndarray]] = [None] * frame_length
         with torch.no_grad():
             masked_input = (feats * (1 - masks_tensor)).view(
                 frame_length, 3, self.model_input_height, self.model_input_width
@@ -125,11 +130,12 @@ class STTNDetInpaint:
                         pred_img[i].astype(np.uint8) * binary_masks[idx]
                         + frames[idx] * (1 - binary_masks[idx])
                     )
-                    if completed[idx] is None:
+                    prev = completed[idx]
+                    if prev is None:
                         completed[idx] = img
                     else:
                         completed[idx] = (
-                            completed[idx].astype(np.float32) * 0.5
-                            + img.astype(np.float32) * 0.5
+                            prev.astype(np.float32) * 0.5 + img.astype(np.float32) * 0.5
                         )
-        return completed
+        # Every frame is covered by at least one neighbour window -> no None left.
+        return cast(List[np.ndarray], completed)

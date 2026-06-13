@@ -8,7 +8,7 @@ text inside the area.
 
 import gc
 import os
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, cast
 
 import cv2
 import numpy as np
@@ -21,9 +21,14 @@ from backend.inpaint.sttn.auto_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools.inpaint_tools import get_inpaint_area_by_mask, is_frame_number_in_ab_sections
-from backend.tools.video_io import FramePrefetcher
+from backend.tools.video_io import FramePrefetcher, make_video_writer
 
-_to_tensors = transforms.Compose([Stack(), ToTorchFormatTensor()])
+_compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
+
+
+def _to_tensors(frames) -> torch.Tensor:
+    """Stack frames into a single normalized tensor (typed wrapper over Compose)."""
+    return _compose(frames)
 
 # Input resolution expected by the pretrained auto-mode checkpoint.
 _MODEL_INPUT_WIDTH = 640
@@ -104,7 +109,7 @@ class STTNInpaint:
         frame_length = len(frames)
         feats = (_to_tensors(frames).unsqueeze(0) * 2 - 1).to(self.device)
 
-        completed: List[np.ndarray] = [None] * frame_length
+        completed: List[Optional[np.ndarray]] = [None] * frame_length
         with torch.no_grad():
             feats = self.model.encoder(
                 feats.view(frame_length, 3, self.model_input_height, self.model_input_width)
@@ -124,14 +129,15 @@ class STTNInpaint:
 
                 for i, idx in enumerate(neighbor_ids):
                     img = pred_img[i].astype(np.uint8)
-                    if completed[idx] is None:
+                    prev = completed[idx]
+                    if prev is None:
                         completed[idx] = img
                     else:
                         completed[idx] = (
-                            completed[idx].astype(np.float32) * 0.5
-                            + img.astype(np.float32) * 0.5
+                            prev.astype(np.float32) * 0.5 + img.astype(np.float32) * 0.5
                         )
-        return completed
+        # Every frame is covered by at least one neighbour window -> no None left.
+        return cast(List[np.ndarray], completed)
 
 
 class STTNAutoInpaint:
@@ -187,15 +193,14 @@ class STTNAutoInpaint:
             writer = input_sub_remover.video_writer
         else:
             ab_sections = None
-            writer = cv2.VideoWriter(
-                self.video_out_path,
-                cv2.VideoWriter_fourcc(*"mp4v"),
-                info["fps"],
-                (info["W_ori"], info["H_ori"]),
+            writer = make_video_writer(
+                self.video_out_path, info["fps"], (info["W_ori"], info["H_ori"])
             )
 
         try:
             if input_mask is None:
+                if self.mask_path is None:
+                    raise ValueError("input_mask or mask_path is required")
                 mask = self.sttn_inpaint.read_mask(self.mask_path)
             else:
                 _, mask = cv2.threshold(input_mask, 127, 1, cv2.THRESH_BINARY)

@@ -6,7 +6,7 @@ runs too short to give STTN/ProPainter temporal context.
 """
 
 import gc
-from typing import List, Union
+from typing import List, Optional, Union, cast
 
 import numpy as np
 import torch
@@ -45,9 +45,9 @@ class LamaInpaint:
             orig_height, orig_width = image.shape[:2]
         else:
             orig_height, orig_width = np.array(image).shape[:2]
-        image, mask = prepare_img_and_mask(image, mask, self.device)
+        image_t, mask_t = prepare_img_and_mask(image, mask, self.device)
         with torch.inference_mode():
-            inpainted = self.model(image, mask)
+            inpainted = self.model(image_t, mask_t)
             result = inpainted[0].permute(1, 2, 0).detach().cpu().numpy()
             result = np.clip(result * 255, 0, 255).astype("uint8")
             return result[:orig_height, :orig_width]
@@ -60,7 +60,7 @@ class LamaInpaint:
             return [self.inpaint(images[0], masks[0])]
 
         orig_height, orig_width = images[0].shape[:2]
-        results: List[np.ndarray] = [None] * len(images)
+        results: List[Optional[np.ndarray]] = [None] * len(images)
         for start in range(0, len(images), _MINI_BATCH_SIZE):
             end = min(start + _MINI_BATCH_SIZE, len(images))
 
@@ -85,7 +85,8 @@ class LamaInpaint:
             del img_tensor, mask_tensor, padded_imgs, padded_masks
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
-        return results
+        # Every slot is filled by the loop above.
+        return cast(List[np.ndarray], results)
 
     def __call__(
         self, input_frames: List[np.ndarray], input_mask: np.ndarray

@@ -11,7 +11,7 @@ import threading
 import traceback
 import uuid
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -32,6 +32,9 @@ from backend.tools.region_remover import (
     remove_regions_video,
 )
 from webapp import ai_detect
+
+if TYPE_CHECKING:
+    from backend.main import SubtitleRemover
 
 DATA_DIR = ROOT / "webapp" / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
@@ -62,7 +65,7 @@ class Job:
         self.log: List[str] = []
         self.out_path = out_path
         self.error: Optional[str] = None
-        self.remover = None           # SubtitleRemover, when applicable
+        self.remover: Optional["SubtitleRemover"] = None  # set for non-region modes
 
     def current_progress(self) -> int:
         if self.remover is not None and self.status == "running":
@@ -185,6 +188,8 @@ def _run_job(job: Job, entry: dict, mode: str, areas_abs, settings: dict) -> Non
             feather = int(settings.get("feather", 12))
             if entry["kind"] == "image":
                 image = read_image(src)
+                if image is None:
+                    raise ValueError(f"cannot read image: {src}")
                 result = remove_regions_image(image, areas_abs, lama, padding, feather)
                 cv2.imencode(Path(src).suffix, result)[1].tofile(str(job.out_path))
                 job.progress = 100
@@ -349,12 +354,12 @@ def analyze(req: AnalyzeRequest):
     meta = entry["meta"]
     areas_abs = _to_abs_areas(req.areas, meta["width"], meta["height"])
     result = analyze_region_motion(entry["path"], areas_abs)
-    result["reason"] = (
+    reason = (
         "영역이 모든 프레임에서 고정되어 있습니다 → 시간축 복원(STTN) 불가, LaMa 권장"
         if result["static"]
         else "영역 내용이 시간에 따라 변합니다 → 시간축 복원(STTN) 가능"
     )
-    return result
+    return {**result, "reason": reason}
 
 
 @app.post("/api/process")

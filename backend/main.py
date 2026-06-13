@@ -440,6 +440,7 @@ class SubtitleRemover:
                     inpainted = self.lama_inpaint.inpaint(batch[0], mask)
                     self.video_writer.write(inpainted)
                 else:
+                    batch = list(batch)
                     for original, inpainted in zip(batch, propainter(batch, mask)):
                         self.video_writer.write(inpainted)
                         self._preview_masked(original, mask, inpainted)

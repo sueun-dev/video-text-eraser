@@ -2,7 +2,7 @@
 
 import sys
 from functools import cached_property
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, cast
 
 import cv2
 from tqdm import tqdm
@@ -216,8 +216,10 @@ class SubtitleDetect:
         """Frame numbers where a scene cut occurs (used to split STTN runs)."""
         scene_starts = []
         for start, _ in scene_detect(video_path, ContentDetector()):
-            if start.frame_num != 0:
-                scene_starts.append(start.frame_num + 1)
+            # scenedetect mistypes frame_num as Optional; it is always an int.
+            frame_num = cast(int, start.frame_num)
+            if frame_num != 0:
+                scene_starts.append(frame_num + 1)
         return scene_starts
 
     @staticmethod
@@ -251,13 +253,15 @@ class SubtitleDetect:
         expanded: List[FrameRange] = []
         for i, (start, end) in enumerate(intervals):
             if start == end:
-                prev_end = expanded[-1][1] if expanded else float("-inf")
-                next_start = intervals[i + 1][0] if i + 1 < len(intervals) else float("inf")
                 half = (target_length - 1) // 2
-                # Clamp to 1: frame numbers are 1-based everywhere (cf.
-                # expand_frame_ranges), so widening must never produce frame 0.
-                new_start = max(start - half, prev_end + 1, 1)
-                new_end = min(start + half, next_start - 1)
+                # Lower bound: the previous interval's end + 1, but never below
+                # frame 1 (frame numbers are 1-based everywhere; cf.
+                # expand_frame_ranges).
+                floor = expanded[-1][1] + 1 if expanded else 1
+                new_start = max(start - half, floor, 1)
+                # Upper bound: stop before the next interval starts.
+                ceil = intervals[i + 1][0] - 1 if i + 1 < len(intervals) else start + half
+                new_end = min(start + half, ceil)
                 if new_end < new_start:
                     new_start, new_end = start, start
                 expanded.append((new_start, new_end))

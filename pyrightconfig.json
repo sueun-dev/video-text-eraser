@@ -1,0 +1,17 @@
+{
+  "include": [
+    "backend/main.py", "backend/config.py",
+    "backend/tools/ocr.py", "backend/tools/inpaint_tools.py",
+    "backend/tools/subtitle_detect.py", "backend/tools/region_remover.py",
+    "backend/tools/video_io.py", "backend/tools/ffmpeg_cli.py",
+    "backend/inpaint/lama_inpaint.py", "backend/inpaint/opencv_inpaint.py",
+    "backend/inpaint/sttn_auto_inpaint.py", "backend/inpaint/sttn_det_inpaint.py",
+    "backend/inpaint/propainter_inpaint.py",
+    "webapp/server.py", "webapp/ai_detect.py"
+  ],
+  "typeCheckingMode": "basic",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "venvPath": ".",
+  "venv": ".venv"
+}
