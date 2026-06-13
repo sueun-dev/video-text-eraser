@@ -137,6 +137,28 @@ python3.12 -m venv .venv
 | `-c`, `--subtitle-area-coords` | 자막 영역 `ymin ymax xmin xmax`, 여러 번 지정 가능 |
 | `--inpaint-mode` | `sttn-auto`(기본)·`sttn-det`·`lama`·`propainter`·`opencv` |
 
+## 테스트 & 품질 (Testing & Quality)
+
+순수 로직(마스크/밴드 계산, 프레임 구간, OCR 좌표 변환, 영역 분석기, AI 응답
+파서, 서버 헬퍼)은 모델·GPU·네트워크 없이 도는 **hermetic pytest 스위트**로
+커버됩니다. 테스트는 뮤테이션 테스팅 관점으로 작성되어 "통과만"이 아니라 실제로
+버그를 잡습니다.
+
+```bash
+.venv/bin/pip install pytest pyright ruff      # 최초 1회
+.venv/bin/python -m pytest tests/              # 단위 테스트
+.venv/bin/ruff check backend/ webapp/ tests/   # 린트
+.venv/bin/pyright                              # 타입 체크 (리팩토링 코드 0 errors)
+```
+
+`test/verify_removal.py`는 실제 영상에 대한 E2E 검증으로, 처리 결과에 OCR을
+다시 돌려 자막이 0개로 떨어졌는지 + 자막 밴드 밖 픽셀이 코덱 노이즈 수준으로
+원본과 동일한지 확인합니다 (자막만 정확히 지웠는지 증명).
+
+```bash
+.venv/bin/python test/verify_removal.py input.mp4 output.mp4 [ymin ymax xmin xmax]
+```
+
 ## 라이선스
 
 [Apache License 2.0](LICENSE) — 이 프로젝트가 파생된 원본과 동일합니다.

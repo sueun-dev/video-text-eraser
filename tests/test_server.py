@@ -185,6 +185,21 @@ def test_image_media_type_normalizes_jpeg():
     assert server._image_media_type("") == "image/png"
 
 
+def test_encode_image_keeps_supported_format(tmp_path):
+    img = np.full((20, 30, 3), 120, dtype=np.uint8)
+    out = server._encode_image(img, ".png", tmp_path / "a.png")
+    assert out.suffix == ".png" and out.exists()
+
+
+def test_encode_image_falls_back_to_png(tmp_path):
+    # .gif can be decoded but OpenCV cannot re-encode it -> PNG fallback, and
+    # the returned path reflects the actual file written (regression: the
+    # webapp must serve this path, not the original .gif name).
+    img = np.full((20, 30, 3), 120, dtype=np.uint8)
+    out = server._encode_image(img, ".gif", tmp_path / "b.gif")
+    assert out.suffix == ".png" and out.exists()
+
+
 def test_image_media_type_covers_full_allowlist():
     # Every JPEG-family / variant extension in the upload allowlist normalizes.
     assert server._image_media_type(".jfif") == "image/jpeg"

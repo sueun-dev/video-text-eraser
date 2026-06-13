@@ -146,6 +146,20 @@ def _read_frame(entry: dict, index: int) -> np.ndarray:
     return frame
 
 
+def _encode_image(image, preferred_suffix: str, out_path: Path) -> Path:
+    """Write ``image`` to ``out_path``; fall back to PNG if the source format
+    cannot be re-encoded by OpenCV (.gif/.heic/.webp). Returns the path written."""
+    try:
+        ok, buf = cv2.imencode(preferred_suffix, image)
+    except cv2.error:
+        ok = False
+    if not ok:
+        out_path = out_path.with_suffix(".png")
+        _, buf = cv2.imencode(".png", image)
+    buf.tofile(str(out_path))
+    return out_path
+
+
 def _image_media_type(suffix: str) -> str:
     """Map a file suffix to a standard image MIME type.
 
@@ -215,7 +229,7 @@ def _run_job(job: Job, entry: dict, mode: str, areas_abs, settings: dict) -> Non
                 if image is None:
                     raise ValueError(f"cannot read image: {src}")
                 result = remove_regions_image(image, areas_abs, lama, padding, feather)
-                cv2.imencode(Path(src).suffix, result)[1].tofile(str(job.out_path))
+                job.out_path = _encode_image(result, Path(src).suffix, job.out_path)
                 job.progress = 100
             else:
                 job.log.append("LaMa region mode: erasing selected areas in every frame")
@@ -233,6 +247,9 @@ def _run_job(job: Job, entry: dict, mode: str, areas_abs, settings: dict) -> Non
             remover.append_output = lambda *args: job.log.append(" ".join(str(a) for a in args))
             job.remover = remover
             remover.run()
+            # run() may switch the output to .png when the source format cannot
+            # be re-encoded; serve whatever it actually wrote.
+            job.out_path = Path(remover.video_out_path)
             job.progress = 100
 
         job.status = "done"
