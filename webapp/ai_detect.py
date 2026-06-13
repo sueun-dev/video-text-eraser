@@ -12,7 +12,6 @@ request the user explicitly triggers.
 
 import base64
 import json
-import re
 from typing import List, Optional, TypedDict
 
 import cv2
@@ -21,6 +20,9 @@ import requests
 
 ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages"
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+# Sonnet 4.6 is a deliberate default: locating a few overlay boxes in one frame
+# is an easy vision task, so the cheaper tier suffices. Users can override the
+# model per request (e.g. claude-opus-4-8) from the UI.
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-6"
 DEFAULT_OPENAI_MODEL = "gpt-4o"
 REQUEST_TIMEOUT = 90
@@ -63,11 +65,28 @@ def _encode_jpeg(frame_bgr: np.ndarray, max_side: int = 1280) -> str:
 
 
 def _parse_boxes(text: str) -> List[DetectedBox]:
-    """Extract the boxes array from a (possibly chatty) model reply."""
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
+    """Extract the boxes array from a (possibly chatty) model reply.
+
+    Uses ``raw_decode`` from the first ``{`` so a trailing second brace block
+    (e.g. ``{"boxes": []} note: {...}``) does not corrupt the match the way a
+    greedy ``{.*}`` regex would.
+    """
+    payload = None
+    decoder = json.JSONDecoder()
+    for start in range(len(text)):
+        if text[start] != "{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(candidate, dict) and "boxes" in candidate:
+            payload = candidate
+            break
+        if payload is None and isinstance(candidate, dict):
+            payload = candidate  # fall back to the first object if none has "boxes"
+    if payload is None:
         raise ValueError(f"no JSON object in model reply: {text[:200]!r}")
-    payload = json.loads(match.group(0))
     boxes: List[DetectedBox] = []
     for box in payload.get("boxes", []):
         try:

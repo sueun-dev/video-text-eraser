@@ -88,13 +88,15 @@ def _reference_frame_ids(
 
 
 class PropainterInpaint:
+    """Flow-guided video inpainting (RAFT + flow completion + transformer)."""
+
     def __init__(
         self,
         device: torch.device,
         model_dir: str,
         sub_video_length: int = 80,
         use_fp16: bool = True,
-    ):
+    ) -> None:
         self.device = device
         self.model_dir = model_dir
         self.use_half = use_fp16 and device != torch.device("cpu")
@@ -129,7 +131,7 @@ class PropainterInpaint:
             model = model.half()
         return model.to(self.device).eval()
 
-    def inpaint(self, frames: List, mask: np.ndarray) -> List[np.ndarray]:
+    def inpaint(self, frames: List[np.ndarray], mask: np.ndarray) -> List[np.ndarray]:
         """Restore one band crop across a run of frames. Returns BGR arrays."""
         if isinstance(frames[0], np.ndarray):
             frames = [Image.fromarray(cv2.cvtColor(f, cv2.COLOR_BGR2RGB)) for f in frames]

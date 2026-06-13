@@ -23,7 +23,11 @@ def batch_generator(data: Sequence, max_batch_size: int) -> Iterator[Sequence]:
     """
     n_samples = len(data)
     batch_size = max_batch_size
-    while n_samples % batch_size < batch_size / 2.0 and batch_size > 1:
+    # Shrink only when there is a *nonzero* trailing batch smaller than half a
+    # batch. A remainder of 0 means perfectly even batches (the best case) and
+    # must not trigger shrinking, otherwise round counts like 12/4 collapse to
+    # size-1 batches.
+    while 0 < n_samples % batch_size < batch_size / 2.0 and batch_size > 1:
         batch_size -= 1
 
     num_batches = n_samples // batch_size

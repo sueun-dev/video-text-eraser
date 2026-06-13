@@ -24,6 +24,8 @@ _BAND_HEIGHT_RATIO = 3 / 16
 
 
 class LamaInpaint:
+    """Single-frame spatial inpainting with the TorchScript big-lama model."""
+
     def __init__(
         self,
         device: torch.device = torch.device("cuda" if torch.cuda.is_available() else "cpu"),

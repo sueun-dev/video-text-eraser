@@ -37,7 +37,7 @@ _BYTES_PER_PIXEL_BUDGET = 12
 class STTNInpaint:
     """Core STTN forward pass shared by the auto-mode pipeline."""
 
-    def __init__(self, device: torch.device, model_path: str):
+    def __init__(self, device: torch.device, model_path: str) -> None:
         self.device = device
         self.model = InpaintGenerator().to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location="cpu")["netG"])
@@ -144,7 +144,7 @@ class STTNAutoInpaint:
         video_path: str,
         mask_path: Optional[str] = None,
         clip_gap: Optional[int] = None,
-    ):
+    ) -> None:
         self.sttn_inpaint = STTNInpaint(device, model_path)
         self.video_path = video_path
         self.mask_path = mask_path

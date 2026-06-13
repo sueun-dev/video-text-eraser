@@ -369,6 +369,12 @@ test_*.mp4
 test*_no_sub*.mp4
 /test/coods/
 /local_test/
+
+# The pytest suite under tests/ is real source — keep it tracked despite the
+# broad test*.py ignore above (but still ignore its compiled caches).
+!tests/
+!tests/**
+tests/**/__pycache__/
 /backend/models/propainter/ProPainter.pth
 /backend/models/big-lama/big-lama.pt
 /test/debug/

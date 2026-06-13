@@ -26,7 +26,9 @@ _MODEL_INPUT_HEIGHT = 240
 
 
 class STTNDetInpaint:
-    def __init__(self, device: torch.device, model_path: str):
+    """Mask-guided STTN: keeps non-mask pixels, regenerates only the holes."""
+
+    def __init__(self, device: torch.device, model_path: str) -> None:
         self.device = device
         self.model = InpaintGenerator().to(self.device)
         self.model.load_state_dict(torch.load(model_path, map_location="cpu")["netG"])
@@ -73,12 +75,6 @@ class STTNDetInpaint:
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
                 frame[ymin:ymax, :, :] = restored
         return frames
-
-    @staticmethod
-    def read_mask(path: str) -> np.ndarray:
-        img = cv2.imread(path, 0)
-        _, img = cv2.threshold(img, 127, 1, cv2.THRESH_BINARY)
-        return img[:, :, None]
 
     def _reference_frame_ids(self, neighbor_ids: List[int], length: int) -> List[int]:
         """Sample far-away frames every ``ref_length`` as global context."""

@@ -100,3 +100,19 @@ class FFmpegVideoWriter:
         except subprocess.TimeoutExpired:
             self._process.terminate()
             self._process.wait(timeout=5)
+
+
+def make_video_writer(output_path, fps, size):
+    """Return an x264 FFmpeg writer, falling back to OpenCV's mp4v writer.
+
+    Both returned objects expose the same ``write(frame)`` / ``release()``
+    interface, so callers do not need to know which backend was chosen.
+    """
+    import cv2
+
+    try:
+        return FFmpegVideoWriter(output_path, fps, size)
+    except Exception:
+        return cv2.VideoWriter(
+            output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size
+        )

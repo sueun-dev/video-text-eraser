@@ -44,7 +44,7 @@ from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools.inpaint_tools import batch_generator, create_mask, expand_frame_ranges
 from backend.tools.model_config import ModelConfig
 from backend.tools.subtitle_detect import SubtitleDetect
-from backend.tools.video_io import FFmpegVideoWriter, FramePrefetcher
+from backend.tools.video_io import FramePrefetcher, make_video_writer
 
 Area = Tuple[int, int, int, int]  # (ymin, ymax, xmin, xmax)
 
@@ -101,12 +101,7 @@ class SubtitleRemover:
     def _create_video_writer(self):
         """Prefer the FFmpeg/libx264 writer; fall back to OpenCV mp4v."""
         temp_path = get_readable_path(self.video_temp_file.name)
-        try:
-            return FFmpegVideoWriter(temp_path, self.fps, self.size)
-        except Exception:
-            return cv2.VideoWriter(
-                temp_path, cv2.VideoWriter_fourcc(*"mp4v"), self.fps, self.size
-            )
+        return make_video_writer(temp_path, self.fps, self.size)
 
     def _default_output_path(self) -> str:
         source_dir = os.path.dirname(self.video_path)

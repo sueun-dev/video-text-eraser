@@ -10,13 +10,13 @@ import os
 import subprocess
 import tempfile
 import traceback
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, TypedDict
 
 import cv2
 import numpy as np
 
 from backend.tools.ffmpeg_cli import FFmpegCLI
-from backend.tools.video_io import FFmpegVideoWriter, FramePrefetcher
+from backend.tools.video_io import FramePrefetcher, make_video_writer
 
 Area = Tuple[int, int, int, int]  # (ymin, ymax, xmin, xmax) absolute pixels
 
@@ -51,20 +51,39 @@ def feather_alpha(mask: np.ndarray, feather: int = DEFAULT_FEATHER) -> np.ndarra
     return alpha[:, :, None]
 
 
+class MotionAnalysis(TypedDict):
+    """Result of :func:`analyze_region_motion` (uniform across all paths)."""
+
+    static: bool
+    region_change: float
+    frame_change: float
+    recommended_mode: str
+
+
+def _motion_result(static: bool, region_change: float, frame_change: float) -> MotionAnalysis:
+    return MotionAnalysis(
+        static=bool(static),
+        region_change=round(region_change, 2),
+        frame_change=round(frame_change, 2),
+        recommended_mode="lama-region" if static else "sttn-auto",
+    )
+
+
 def analyze_region_motion(
     video_path: str, areas: List[Area], samples: int = 12
-) -> dict:
+) -> MotionAnalysis:
     """Estimate whether the selected region is a *fixed* overlay.
 
     Compares temporal change inside the region against the whole frame.
     A region that stays still while the frame moves is almost certainly an
-    opaque watermark — STTN cannot help there, LaMa can.
+    opaque watermark — STTN cannot help there, LaMa can. A too-short video is
+    reported as static (single-frame inputs go to LaMa anyway).
     """
     cap = cv2.VideoCapture(video_path)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     if frame_count < 2:
         cap.release()
-        return {"static": True, "region_change": 0.0, "frame_change": 0.0}
+        return _motion_result(True, 0.0, 0.0)
 
     indices = np.linspace(0, frame_count - 1, min(samples, frame_count), dtype=int)
     crops, frames = [], []
@@ -80,7 +99,7 @@ def analyze_region_motion(
     cap.release()
 
     if len(frames) < 2:
-        return {"static": True, "region_change": 0.0, "frame_change": 0.0}
+        return _motion_result(True, 0.0, 0.0)
 
     region_change = float(np.mean([
         np.mean([np.abs(a - b).mean() for a, b in zip(crops[i], crops[i + 1])])
@@ -93,12 +112,7 @@ def analyze_region_motion(
     static = region_change < 2.0 or (
         frame_change > 0 and region_change < 0.35 * frame_change
     )
-    return {
-        "static": bool(static),
-        "region_change": round(region_change, 2),
-        "frame_change": round(frame_change, 2),
-        "recommended_mode": "lama-region" if static else "sttn-auto",
-    }
+    return _motion_result(static, region_change, frame_change)
 
 
 def merge_audio(source_video: str, silent_video: str, out_path: str) -> bool:
@@ -155,12 +169,7 @@ def remove_regions_video(
 
     silent_temp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     silent_temp.close()
-    try:
-        writer = FFmpegVideoWriter(silent_temp.name, fps, (width, height))
-    except Exception:
-        writer = cv2.VideoWriter(
-            silent_temp.name, cv2.VideoWriter_fourcc(*"mp4v"), fps, (width, height)
-        )
+    writer = make_video_writer(silent_temp.name, fps, (width, height))
 
     reader = FramePrefetcher(cap)
     done = 0

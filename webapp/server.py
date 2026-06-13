@@ -119,6 +119,21 @@ def _read_frame(entry: dict, index: int) -> np.ndarray:
     return frame
 
 
+def _image_media_type(suffix: str) -> str:
+    """Map a file suffix to a standard image MIME type.
+
+    Covers the JPEG family (jpg/jpe/jfif/jif/jfi -> jpeg), tif -> tiff, and
+    dib -> bmp, which are all in the upload allowlist (common_tools) and would
+    otherwise be served with a non-standard ``image/<ext>`` type.
+    """
+    ext = suffix.lower().lstrip(".") or "png"
+    aliases = {
+        "jpg": "jpeg", "jpe": "jpeg", "jfif": "jpeg", "jif": "jpeg", "jfi": "jpeg",
+        "tif": "tiff", "dib": "bmp",
+    }
+    return f"image/{aliases.get(ext, ext)}"
+
+
 def _to_abs_areas(areas_norm: List[List[float]], width: int, height: int):
     """Normalized [ymin,ymax,xmin,xmax] floats -> absolute pixel tuples."""
     result = []
@@ -159,7 +174,7 @@ def _apply_settings(settings: dict) -> None:
 # ---------------------------------------------------------------------------
 
 def _run_job(job: Job, entry: dict, mode: str, areas_abs, settings: dict) -> None:
-    job.status = "running"
+    # status is set to "running" synchronously by process() under the lock.
     try:
         _apply_settings(settings)
         src = entry["path"]
@@ -198,6 +213,14 @@ def _run_job(job: Job, entry: dict, mode: str, areas_abs, settings: dict) -> Non
         job.status = "error"
         job.error = str(e)
         job.log.append(f"ERROR: {e}")
+    finally:
+        # Self-heal the single-job guard: if the worker died without reaching a
+        # terminal state (e.g. a BaseException), release it so the server does
+        # not reject every future job with 409.
+        if job.status == "running":
+            job.status = "error"
+            job.error = job.error or "job terminated unexpectedly"
+            job.log.append("ERROR: job terminated unexpectedly")
 
 
 # ---------------------------------------------------------------------------
@@ -340,7 +363,11 @@ def process(req: ProcessRequest):
     if req.mode not in MODE_MAP and req.mode != "lama-region":
         raise HTTPException(400, f"unknown mode: {req.mode}")
     with _job_lock:
-        if any(j.status == "running" for j in JOBS.values()):
+        # Count "queued" too: a newly created job only flips to "running" inside
+        # the daemon thread, so checking only "running" would let a second
+        # request slip through before the first thread starts (TOCTOU). The job
+        # is marked "running" synchronously below, while still holding the lock.
+        if any(j.status in ("queued", "running") for j in JOBS.values()):
             raise HTTPException(409, "다른 작업이 실행 중입니다. 완료 후 다시 시도하세요.")
         meta = entry["meta"]
         areas_abs = _to_abs_areas(req.areas, meta["width"], meta["height"])
@@ -349,6 +376,7 @@ def process(req: ProcessRequest):
         job_id = uuid.uuid4().hex[:12]
         suffix = Path(entry["path"]).suffix if entry["kind"] == "image" else ".mp4"
         job = Job(job_id, RESULT_DIR / f"{job_id}{suffix}")
+        job.status = "running"
         JOBS[job_id] = job
         threading.Thread(
             target=_run_job, args=(job, entry, req.mode, areas_abs, req.settings),
@@ -375,8 +403,8 @@ def job_status(job_id: str):
 def source(file_id: str):
     """Serve the uploaded original for side-by-side comparison."""
     entry = _file_or_404(file_id)
-    suffix = Path(entry["path"]).suffix.lower()
-    media = "video/mp4" if entry["kind"] == "video" else f"image/{suffix.lstrip('.')}"
+    suffix = Path(entry["path"]).suffix
+    media = "video/mp4" if entry["kind"] == "video" else _image_media_type(suffix)
     return FileResponse(entry["path"], media_type=media)
 
 
@@ -385,7 +413,10 @@ def result(job_id: str):
     job = JOBS.get(job_id)
     if job is None or job.status != "done":
         raise HTTPException(404, "result not ready")
-    media = "video/mp4" if job.out_path.suffix == ".mp4" else "image/png"
+    media = (
+        "video/mp4" if job.out_path.suffix == ".mp4"
+        else _image_media_type(job.out_path.suffix)
+    )
     return FileResponse(str(job.out_path), media_type=media,
                         filename=f"erased{job.out_path.suffix}")
 
