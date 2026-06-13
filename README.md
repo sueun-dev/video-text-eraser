@@ -1,5 +1,7 @@
 # Video Text Eraser
 
+[![CI](https://github.com/sueun-dev/video-text-eraser/actions/workflows/ci.yml/badge.svg)](https://github.com/sueun-dev/video-text-eraser/actions/workflows/ci.yml)
+
 영상과 이미지에 박혀 있는(하드코딩된) 자막·텍스트 워터마크를 AI로 지우는 도구입니다.
 서드파티 API 없이 **전부 로컬에서** 동작하며, Apple Silicon에 네이티브로 대응합니다.
 
