@@ -1,7 +1,6 @@
 """Tests for backend.tools.inpaint_tools pure utilities."""
 
 import numpy as np
-import pytest
 
 from backend.config import config
 from backend.tools.inpaint_tools import (

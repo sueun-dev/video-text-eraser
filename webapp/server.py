@@ -334,7 +334,7 @@ def detect_ai(req: AIDetectRequest):
     try:
         boxes = ai_detect.detect(req.provider, img, req.api_key, req.model, req.target)
     except Exception as e:
-        raise HTTPException(502, str(e))
+        raise HTTPException(502, str(e)) from e
     return {"boxes": boxes}
 
 
