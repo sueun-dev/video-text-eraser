@@ -34,3 +34,31 @@ def test_collect_run_boxes_drops_tall_false_detections():
 def test_collect_run_boxes_empty_when_no_boxes():
     sr = _bare_remover()
     assert sr._collect_run_boxes({}, 1, 5) == []
+
+
+class _FakeBar:
+    """Minimal stand-in for tqdm with a settable total."""
+    def __init__(self, total):
+        self.total = total
+        self.n = 0
+
+    def update(self, inc):
+        self.n += inc
+
+
+def test_update_progress_handles_zero_total():
+    # frame_count==0 metadata -> tbar.total==0 must not ZeroDivisionError.
+    sr = _bare_remover()
+    sr.progress_listeners = []
+    sr.isFinished = False
+    sr.update_progress(_FakeBar(0), 1)
+    assert sr.progress_total == 0
+
+
+def test_update_progress_computes_percentage():
+    sr = _bare_remover()
+    sr.progress_listeners = []
+    sr.isFinished = False
+    bar = _FakeBar(10)
+    sr.update_progress(bar, 5)
+    assert sr.progress_total == 50

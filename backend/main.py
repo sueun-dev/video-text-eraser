@@ -39,10 +39,10 @@ from backend.tools.common_tools import (
     is_video_or_image,
     read_image,
 )
+from backend.tools.constant import Area
 from backend.tools.ffmpeg_cli import FFmpegCLI
 from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools.inpaint_tools import batch_generator, create_mask, expand_frame_ranges
-from backend.tools.constant import Area
 from backend.tools.model_config import ModelConfig
 from backend.tools.subtitle_detect import SubtitleDetect
 from backend.tools.video_io import FramePrefetcher, make_video_writer
@@ -75,8 +75,11 @@ class SubtitleRemover:
         self.ext = os.path.splitext(vd_path)[-1]
 
         self.video_cap = cv2.VideoCapture(get_readable_path(vd_path))
-        self.frame_count = int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT) + 0.5)
-        self.fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+        # Guard against corrupt/missing metadata: a negative frame count would
+        # drop frames, and a 0/NaN fps would make the writer emit an empty file.
+        self.frame_count = max(0, int(self.video_cap.get(cv2.CAP_PROP_FRAME_COUNT) + 0.5))
+        raw_fps = self.video_cap.get(cv2.CAP_PROP_FPS)
+        self.fps = raw_fps if raw_fps and raw_fps > 0 and raw_fps == raw_fps else 25.0
         self.frame_width = int(self.video_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.frame_height = int(self.video_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         self.size = (self.frame_width, self.frame_height)
@@ -92,6 +95,9 @@ class SubtitleRemover:
         self.isFinished = False
         self.is_successful_merged = False
         self.progress_listeners = []
+        # Active frame prefetcher, stopped in run()'s finally so its daemon
+        # thread cannot leak if processing raises mid-run.
+        self._active_reader: Optional[FramePrefetcher] = None
 
     # ------------------------------------------------------------------
     # Construction helpers
@@ -152,7 +158,7 @@ class SubtitleRemover:
 
     def update_progress(self, tbar, increment: int) -> None:
         tbar.update(increment)
-        self.progress_remover = int(tbar.n / tbar.total * 100)
+        self.progress_remover = int(tbar.n / tbar.total * 100) if tbar.total else 0
         self.progress_total = self.progress_remover
         self.notify_progress_listeners()
 
@@ -188,21 +194,35 @@ class SubtitleRemover:
             file=sys.__stdout__, desc="Subtitle Removing",
         )
 
-        if self.is_picture:
-            self._process_picture(tbar)
-        else:
-            self._process_video(tbar)
+        try:
+            if self.is_picture:
+                self._process_picture(tbar)
+            else:
+                self._process_video(tbar)
+                # The writer must be flushed before the audio is muxed in.
+                self.video_writer.release()
+                self.merge_audio_to_video()
 
-        self.video_cap.release()
-        self.video_writer.release()
-        if not self.is_picture:
-            self.merge_audio_to_video()
-
-        self.append_output(tr["Main"]["FinishedProcessing"].format(self.video_out_path))
-        self.append_output(tr["Main"]["ProcessingTime"].format(round(time.time() - start_time)))
-        self.isFinished = True
-        self.progress_total = 100
-        self._remove_temp_file()
+            self.append_output(tr["Main"]["FinishedProcessing"].format(self.video_out_path))
+            self.append_output(
+                tr["Main"]["ProcessingTime"].format(round(time.time() - start_time))
+            )
+            self.isFinished = True
+            self.progress_total = 100
+        finally:
+            # Always release the capture, prefetcher thread, writer (ffmpeg
+            # subprocess) and temp file, even if processing raised partway.
+            if self._active_reader is not None:
+                try:
+                    self._active_reader.stop()
+                except Exception:
+                    pass
+            self.video_cap.release()
+            try:
+                self.video_writer.release()  # idempotent if already released above
+            except Exception:
+                pass
+            self._remove_temp_file()
 
     def _ab_sections_text(self) -> str:
         if self.ab_sections:
@@ -228,7 +248,16 @@ class SubtitleRemover:
             inpainted = original
             self.update_preview_with_comp(original, inpainted)
 
-        cv2.imencode(self.ext, inpainted)[1].tofile(self.video_out_path)
+        try:
+            ok, buf = cv2.imencode(self.ext, inpainted)
+        except cv2.error:
+            ok = False
+        if not ok:
+            # Some decodable formats (gif/heic/webp) cannot be re-encoded by
+            # OpenCV; fall back to PNG so a result is still produced.
+            self.video_out_path = os.path.splitext(self.video_out_path)[0] + ".png"
+            _, buf = cv2.imencode(".png", inpainted)
+        buf.tofile(self.video_out_path)
         tbar.update(1)
         self.progress_total = 100
 
@@ -334,6 +363,7 @@ class SubtitleRemover:
 
         self.append_output(tr["Main"]["ProcessingStartRemovingSubtitles"])
         reader = FramePrefetcher(self.video_cap)
+        self._active_reader = reader
         frame_index = 0
         while True:
             ret, frame = reader.read()
@@ -404,6 +434,7 @@ class SubtitleRemover:
         self.append_output(tr["Main"]["ProcessingStartRemovingSubtitles"])
 
         reader = FramePrefetcher(self.video_cap)
+        self._active_reader = reader
         frame_index = 0
         while True:
             ret, frame = reader.read()
@@ -463,7 +494,7 @@ class SubtitleRemover:
         ]
         try:
             subprocess.check_output(
-                extract_cmd, stdin=open(os.devnull), shell=use_shell, timeout=600
+                extract_cmd, stdin=subprocess.DEVNULL, shell=use_shell, timeout=600
             )
         except Exception as e:
             traceback.print_exc()
@@ -479,7 +510,7 @@ class SubtitleRemover:
             ]
             try:
                 subprocess.check_output(
-                    merge_cmd, stdin=open(os.devnull), shell=use_shell, timeout=600
+                    merge_cmd, stdin=subprocess.DEVNULL, shell=use_shell, timeout=600
                 )
             except Exception as e:
                 traceback.print_exc()

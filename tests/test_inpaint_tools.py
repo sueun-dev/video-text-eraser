@@ -120,6 +120,13 @@ def test_empty_mask_returns_no_bands():
     assert get_inpaint_area_by_mask(200, 100, 30, np.zeros((100, 200), np.uint8)) == []
 
 
+def test_nonpositive_band_height_returns_no_bands():
+    # A few-pixel-wide frame yields h<=0; must not crash (would zero-height crop).
+    mask = create_mask((100, 200), [(40, 60, 50, 150)])
+    assert get_inpaint_area_by_mask(200, 100, 0, mask) == []
+    assert get_inpaint_area_by_mask(200, 100, -3, mask) == []
+
+
 def test_two_separated_islands_make_two_bands():
     # Two vertically separated text lines (boxes given as xmin,xmax,ymin,ymax).
     mask = create_mask((400, 200), [(50, 150, 20, 35), (50, 150, 300, 320)])

@@ -118,6 +118,11 @@ def make_video_writer(output_path, fps, size):
     """
     import cv2
 
+    # A 0 or NaN fps (common with corrupt/variable-rate sources) makes both
+    # backends emit an unplayable/empty file; fall back to a sane default.
+    if not fps or fps <= 0 or fps != fps:
+        fps = 25.0
+
     width, height = size
     if width % 2 == 0 and height % 2 == 0:
         try:

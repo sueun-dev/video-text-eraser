@@ -42,6 +42,30 @@ RESULT_DIR = DATA_DIR / "results"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
+# Per-upload byte cap, enforced while streaming to disk.
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB
+
+
+def _sweep_stale_files(max_age_seconds: int = 24 * 3600) -> None:
+    """Delete leftover uploads/results from previous runs so disk use stays bounded.
+
+    Best-effort: media decoded from prior sessions should not linger forever on
+    a long-lived local instance. Errors are ignored (files may be in use).
+    """
+    import time as _time
+
+    now = _time.time()
+    for folder in (UPLOAD_DIR, RESULT_DIR):
+        for path in folder.glob("*"):
+            try:
+                if now - path.stat().st_mtime > max_age_seconds:
+                    path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+_sweep_stale_files()
+
 MODE_MAP = {
     "sttn-auto": InpaintMode.STTN_AUTO,
     "sttn-det": InpaintMode.STTN_DET,
@@ -267,8 +291,16 @@ async def upload(file: UploadFile = File(...)):
         raise HTTPException(400, f"unsupported file type: {suffix}")
     file_id = uuid.uuid4().hex[:12]
     dest = UPLOAD_DIR / f"{file_id}{suffix}"
+    # Enforce a byte cap during streaming so a huge upload cannot fill the disk.
+    # (The old image-only 100MB check ran only after the full write, too late.)
+    total = 0
     with open(dest, "wb") as out:
         while chunk := await file.read(1 << 20):
+            total += len(chunk)
+            if total > MAX_UPLOAD_BYTES:
+                out.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "file too large")
             out.write(chunk)
 
     if is_image_file(str(dest)):

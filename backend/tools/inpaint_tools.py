@@ -169,7 +169,9 @@ def get_inpaint_area_by_mask(
     Inpaint models only see these bands instead of whole frames, which keeps
     inference cheap. Returns bands as (ymin, ymax, xmin, xmax).
     """
-    if np.all(mask == 0):
+    # A non-positive band height (e.g. a frame only a few pixels wide) would
+    # produce a zero-height crop that crashes cv2.resize downstream.
+    if h <= 0 or np.all(mask == 0):
         return []
 
     binary_mask = (mask > 0).astype(np.uint8) * 255

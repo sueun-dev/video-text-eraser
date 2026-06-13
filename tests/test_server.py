@@ -108,6 +108,16 @@ def test_upload_rejects_unsupported_type(client):
     assert client.post("/api/upload", files=files).status_code == 400
 
 
+def test_upload_rejects_oversize(client, monkeypatch):
+    # Lower the cap and send a payload above it -> 413, and no file left behind.
+    monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 1024)
+    before = len(list(server.UPLOAD_DIR.glob("*")))
+    payload = b"\x00" * 4096
+    res = client.post("/api/upload", files={"file": ("big.mp4", payload, "video/mp4")})
+    assert res.status_code == 413
+    assert len(list(server.UPLOAD_DIR.glob("*"))) == before   # partial upload cleaned up
+
+
 def _upload_synth(client, synth_video):
     path = synth_video(frames=8, w=160, h=90, fps=10)
     with open(path, "rb") as fh:
