@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # Hermetic tests need no models/network/display.
+      PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK: "True"
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch keeps the install small and deterministic.
+          pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+          pip install fastapi uvicorn python-multipart httpx imageio-ffmpeg
+          pip install pytest ruff
+
+      - name: Lint (ruff)
+        run: |
+          ruff check backend/ webapp/ tests/ \
+            --exclude backend/scenedetect \
+            --exclude backend/inpaint/video \
+            --exclude backend/inpaint/sttn \
+            --exclude backend/inpaint/utils \
+            --exclude backend/tools/train
+
+      - name: Unit tests (hermetic)
+        run: pytest tests/ -m "not slow" -q
