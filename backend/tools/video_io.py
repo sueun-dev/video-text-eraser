@@ -8,9 +8,9 @@ from .ffmpeg_cli import FFmpegCLI
 
 
 class FramePrefetcher:
-    """
-    后台线程预解码视频帧，使 I/O 与模型推理重叠。
-    接口兼容 cv2.VideoCapture（read/release）。
+    """Decode frames on a background thread so I/O overlaps model inference.
+
+    Interface-compatible with cv2.VideoCapture (read/release).
     """
 
     def __init__(self, video_cap, buffer_size=10):
@@ -28,14 +28,14 @@ class FramePrefetcher:
                 break
 
     def read(self):
-        """读取下一帧，接口与 cv2.VideoCapture.read() 一致。"""
+        """Read the next frame; same contract as cv2.VideoCapture.read()."""
         return self._buffer.get()
 
     def get(self, propId):
         return self.cap.get(propId)
 
     def stop(self):
-        """停止预读取，不释放底层 video_cap。"""
+        """Stop prefetching without releasing the underlying video_cap."""
         self._stopped = True
         try:
             while not self._buffer.empty():
@@ -50,9 +50,9 @@ class FramePrefetcher:
 
 
 class FFmpegVideoWriter:
-    """
-    通过 FFmpeg 管道写入帧，使用 libx264 编码。
-    接口兼容 cv2.VideoWriter（write/release）。
+    """Write frames through an FFmpeg pipe using libx264 encoding.
+
+    Interface-compatible with cv2.VideoWriter (write/release).
     """
 
     def __init__(self, output_path, fps, size):
@@ -81,7 +81,7 @@ class FFmpegVideoWriter:
         )
 
     def write(self, frame):
-        """写入一帧（numpy BGR 数组）。"""
+        """Write one frame (a numpy BGR array)."""
         if frame.dtype != np.uint8:
             frame = np.clip(frame, 0, 255).astype(np.uint8)
         try:
@@ -90,7 +90,7 @@ class FFmpegVideoWriter:
             pass
 
     def release(self):
-        """关闭管道并等待编码完成。"""
+        """Close the pipe and wait for encoding to finish."""
         try:
             self._process.stdin.close()
         except BrokenPipeError:
@@ -107,12 +107,20 @@ def make_video_writer(output_path, fps, size):
 
     Both returned objects expose the same ``write(frame)`` / ``release()``
     interface, so callers do not need to know which backend was chosen.
+
+    Odd width/height go straight to OpenCV: libx264 with yuv420p requires even
+    dimensions and would otherwise fail *asynchronously* inside the ffmpeg
+    process (producing a silent 0-byte file that the try/except cannot catch),
+    whereas OpenCV's mp4v writer handles odd dimensions fine.
     """
     import cv2
 
-    try:
-        return FFmpegVideoWriter(output_path, fps, size)
-    except Exception:
-        return cv2.VideoWriter(
-            output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size
-        )
+    width, height = size
+    if width % 2 == 0 and height % 2 == 0:
+        try:
+            return FFmpegVideoWriter(output_path, fps, size)
+        except Exception:
+            pass
+    return cv2.VideoWriter(
+        output_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, size
+    )

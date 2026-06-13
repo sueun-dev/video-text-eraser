@@ -85,6 +85,25 @@ def test_merge_keeps_long_intervals_apart():
     assert out == [(1, 50), (60, 120)]
 
 
+def test_merge_single_point_never_goes_below_frame_one():
+    # Regression: half=(11-1)//2=5 would push (1,1) to start -4; must clamp to 1.
+    out = SubtitleDetect.filter_and_merge_intervals([(1, 1)], 11)
+    assert out == [(1, 6)]
+    assert all(start >= 1 for start, _ in out)
+
+
+def test_merge_single_point_clamped_by_prev_end():
+    # The widened single point cannot start before the previous interval ends.
+    out = SubtitleDetect.filter_and_merge_intervals([(3, 8), (10, 10)], 11)
+    assert out == [(3, 15)]          # (10,10) widened to start 9 (prev_end+1), then merged
+
+
+def test_merge_single_point_clamped_by_next_start():
+    # The widened single point cannot extend into the next interval.
+    out = SubtitleDetect.filter_and_merge_intervals([(5, 5), (8, 20)], 11)
+    assert out == [(1, 20)]          # (5,5) end clamped to 7 (next_start-1), then merged
+
+
 # --------------------------------------------------------------------------
 # are_similar
 # --------------------------------------------------------------------------
@@ -119,6 +138,19 @@ def test_unify_keeps_distinct_boxes():
 def test_unify_empty():
     det = _bare_detector()
     assert det.unify_regions({}) == {}
+
+
+def test_unify_multibox_positional_matching():
+    # Boxes are matched POSITIONALLY by index across frames.
+    det = _bare_detector()
+    a = (10, 100, 20, 40)
+    a_jittered = (12, 102, 22, 42)
+    b = (200, 300, 20, 40)
+    # Frame 2 gains a second box: box 0 snaps to frame 1's box; box 1 has no
+    # reference (idx >= len(previous)) and is kept verbatim.
+    unified = det.unify_regions({1: [a], 2: [a_jittered, b]})
+    assert unified[2][0] == a
+    assert unified[2][1] == b
 
 
 # --------------------------------------------------------------------------

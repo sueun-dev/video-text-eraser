@@ -17,7 +17,7 @@ import time
 import traceback
 from functools import cached_property
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -42,11 +42,10 @@ from backend.tools.common_tools import (
 from backend.tools.ffmpeg_cli import FFmpegCLI
 from backend.tools.hardware_accelerator import HardwareAccelerator
 from backend.tools.inpaint_tools import batch_generator, create_mask, expand_frame_ranges
+from backend.tools.constant import Area
 from backend.tools.model_config import ModelConfig
 from backend.tools.subtitle_detect import SubtitleDetect
 from backend.tools.video_io import FramePrefetcher, make_video_writer
-
-Area = Tuple[int, int, int, int]  # (ymin, ymax, xmin, xmax)
 
 
 class SubtitleRemover:

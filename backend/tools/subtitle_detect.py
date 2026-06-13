@@ -2,7 +2,7 @@
 
 import sys
 from functools import cached_property
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 from tqdm import tqdm
@@ -12,15 +12,13 @@ from backend.scenedetect import scene_detect
 from backend.scenedetect.detectors import ContentDetector
 
 from .common_tools import get_readable_path
+from .constant import Area, Box, FrameRange
 from .hardware_accelerator import HardwareAccelerator
 from .inpaint_tools import is_frame_number_in_ab_sections
 from .model_config import ModelConfig
 from .ocr import get_coordinates
 
-Box = Tuple[int, int, int, int]                  # (xmin, xmax, ymin, ymax)
-Area = Tuple[int, int, int, int]                 # (ymin, ymax, xmin, xmax)
 FrameBoxes = Dict[int, List[Box]]                # frame number -> detected boxes
-FrameRange = Tuple[int, int]                     # inclusive (start, end)
 
 
 class SubtitleDetect:
@@ -256,7 +254,9 @@ class SubtitleDetect:
                 prev_end = expanded[-1][1] if expanded else float("-inf")
                 next_start = intervals[i + 1][0] if i + 1 < len(intervals) else float("inf")
                 half = (target_length - 1) // 2
-                new_start = max(start - half, prev_end + 1)
+                # Clamp to 1: frame numbers are 1-based everywhere (cf.
+                # expand_frame_ranges), so widening must never produce frame 0.
+                new_start = max(start - half, prev_end + 1, 1)
                 new_end = min(start + half, next_start - 1)
                 if new_end < new_start:
                     new_start, new_end = start, start

@@ -374,16 +374,29 @@ $('btnRun').onclick = async ()=>{
       body:JSON.stringify({file_id:state.fileId, mode:state.mode,
         areas:state.boxes.map(b=>[b.ymin,b.ymax,b.xmin,b.xmax]), settings:settings()})});
     if(!res.ok) throw new Error((await res.json()).detail||res.status);
-    state.job=(await res.json()).job_id; poll();
+    state.job=(await res.json()).job_id; pollFails=0; poll();
   }catch(e){ toast('실행 실패: '+e.message,5000); $('btnRun').disabled=false; } };
 
+let pollFails=0;
 async function poll(){
-  const res=await fetch('/api/job/'+state.job); const d=await res.json();
-  $('fill').style.width=d.progress+'%'; $('pct').textContent=d.progress+'% — '+d.status;
-  $('log').textContent=(d.log||[]).join('\n'); $('log').scrollTop=$('log').scrollHeight;
-  if(d.status==='done'){ $('btnRun').disabled=false; showResult(d.result_url); return; }
-  if(d.status==='error'){ $('btnRun').disabled=false; toast('실패: '+d.error,6000); return; }
-  setTimeout(poll, 1000); }
+  try{
+    const res=await fetch('/api/job/'+state.job);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    const d=await res.json();
+    pollFails=0;
+    $('fill').style.width=d.progress+'%'; $('pct').textContent=d.progress+'% — '+d.status;
+    $('log').textContent=(d.log||[]).join('\n'); $('log').scrollTop=$('log').scrollHeight;
+    if(d.status==='done'){ $('btnRun').disabled=false; showResult(d.result_url); return; }
+    if(d.status==='error'){ $('btnRun').disabled=false; toast('실패: '+d.error,6000); return; }
+    setTimeout(poll, 1000);
+  }catch(e){
+    // Transient failure (server restart, network blip): retry a few times
+    // before giving up, so the UI never freezes silently.
+    pollFails++;
+    if(pollFails<=5){ setTimeout(poll, 2000); }
+    else{ $('btnRun').disabled=false; toast('진행 상태 확인 실패: '+e.message+' — 재시도 중단',6000); }
+  }
+}
 
 function showResult(url){
   $('resultWrap').style.display='block';

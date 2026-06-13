@@ -4,6 +4,7 @@ import numpy as np
 
 from backend.config import config
 from backend.tools.inpaint_tools import (
+    _align_to_multiple,
     batch_generator,
     create_mask,
     expand_frame_ranges,
@@ -169,6 +170,39 @@ def test_band_for_very_tall_island_clamped_to_frame():
     ymin, ymax, _, _ = get_inpaint_area_by_mask(200, 120, 50, mask)[0]
     assert ymax - ymin == 50
     assert 0 <= ymin and ymax <= 120
+
+
+def test_two_lines_merge_only_when_bridged():
+    # Two stacked text lines with an empty gap -> two bands (split path).
+    m = np.zeros((300, 200), np.uint8)
+    m[20:40, 40:160] = 255
+    m[60:80, 40:160] = 255
+    assert len(get_inpaint_area_by_mask(200, 300, 100, m)) == 2
+    # Add a vertical bridge between them -> they merge into one band.
+    m[40:60, 95:105] = 255
+    assert len(get_inpaint_area_by_mask(200, 300, 100, m)) == 1
+
+
+def test_tiny_island_rejected_as_noise():
+    # A blob smaller than _MIN_ISLAND_AREA (10 px) is ignored.
+    n = np.zeros((100, 200), np.uint8)
+    n[10:12, 10:13] = 255          # area = 2 * 3 = 6 < 10
+    assert get_inpaint_area_by_mask(200, 100, 30, n) == []
+
+
+def test_align_to_multiple_recenters_width():
+    # Non-full-width band whose width is not a multiple of 8 is recentered.
+    ymin, ymax, xmin, xmax = _align_to_multiple(0, 8, 5, 200, 8, frame_height=200)
+    assert (ymax - ymin) % 8 == 0
+    assert (xmax - xmin) % 8 == 0
+    assert xmin == 6 and xmax == 198      # symmetric shrink around center
+
+
+def test_align_to_multiple_symmetric_height_shrink():
+    # Band touching both edges shrinks symmetrically to a multiple of 8.
+    ymin, ymax, xmin, xmax = _align_to_multiple(0, 100, 0, 200, 8, frame_height=100)
+    assert (ymax - ymin) % 8 == 0
+    assert ymin == 2 and ymax == 98
 
 
 # --------------------------------------------------------------------------

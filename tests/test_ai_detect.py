@@ -1,6 +1,7 @@
 """Tests for webapp.ai_detect parsing/encoding (no network calls)."""
 
 import base64
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -116,3 +117,24 @@ def test_detect_unknown_provider_raises():
     frame = np.zeros((10, 10, 3), dtype=np.uint8)
     with pytest.raises(ValueError):
         detect("gemini", frame, "key")
+
+
+def test_detect_routes_to_correct_provider_with_target_mapping():
+    frame = np.zeros((4, 4, 3), dtype=np.uint8)
+    with patch("webapp.ai_detect.detect_claude", return_value=["C"]) as mc, \
+         patch("webapp.ai_detect.detect_openai", return_value=["O"]) as mo:
+        assert detect("claude", frame, "k", target="text") == ["C"]
+        assert mc.call_args.args[3] == "text overlays only (subtitles, captions)"
+        assert mo.call_count == 0
+
+        assert detect("openai", frame, "k", target="logo") == ["O"]
+        assert mo.call_args.args[3] == "graphic overlays only (logos, watermarks, badges)"
+
+        detect("claude", frame, "k", target="anything-else")
+        assert mc.call_args.args[3] == "both text and graphic overlays"
+
+
+def test_parse_boxes_malformed_container_no_crash():
+    # boxes as a dict, or a list of non-dicts, must degrade to [] not crash.
+    assert _parse_boxes('{"boxes": {"ymin": 0.1}}') == []
+    assert _parse_boxes('{"boxes": ["hello", 42]}') == []

@@ -18,12 +18,18 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ORIGINAL = sys.argv[1] if len(sys.argv) > 1 else "test/test.mp4"
 PROCESSED = sys.argv[2] if len(sys.argv) > 2 else "/tmp/test_no_sub.mp4"
-# Subtitle area given to the remover: (ymin, ymax, xmin, xmax)
-SUB_AREA = (340, 480, 0, 852)
-# STTN-det replaces a full-width band around the mask; rows above this are
-# expected to be bit-identical up to codec noise. band = W * 5/18 ≈ 236 px,
-# anchored to cover the bottom subtitle area.
-UNTOUCHED_BELOW_Y = 240
+# Subtitle area given to the remover: (ymin, ymax, xmin, xmax). Override for
+# non-default clips:
+#   verify_removal.py ORIG PROC YMIN YMAX XMIN XMAX [UNTOUCHED_BELOW_Y]
+if len(sys.argv) >= 7:
+    SUB_AREA = tuple(int(a) for a in sys.argv[3:7])
+else:
+    SUB_AREA = (340, 480, 0, 852)   # the bundled 852x480 test/test.mp4 clip
+# Rows above this Y are expected codec-identical. The inpaint band extends
+# ABOVE the subtitle area (STTN uses ~W*5/18), so this must sit safely above
+# the band's top, not at the subtitle area's top. Caller can override (arg 8);
+# default is tuned for the bundled clip + sttn-det.
+UNTOUCHED_BELOW_Y = int(sys.argv[7]) if len(sys.argv) >= 8 else 240
 SAMPLE_EVERY = 25
 # Headroom over the measured codec-only baseline before we call it an edit.
 CODEC_NOISE_HEADROOM = 1.25
@@ -92,6 +98,19 @@ def main():
     assert geo_in[:2] == geo_out[:2], "resolution changed!"
     assert abs(geo_in[2] - geo_out[2]) <= 2, "frame count changed!"
     print("    PASS: geometry preserved")
+
+    # Fail loudly if SUB_AREA / UNTOUCHED_BELOW_Y do not fit this clip, instead
+    # of silently producing meaningless results on a mismatched resolution.
+    width, height = geo_in[0], geo_in[1]
+    ymin, ymax, xmin, xmax = SUB_AREA
+    assert 0 <= ymin < ymax <= height and 0 <= xmin < xmax <= width, (
+        f"SUB_AREA {SUB_AREA} does not fit the {width}x{height} clip; pass "
+        f"YMIN YMAX XMIN XMAX on the CLI for this video"
+    )
+    assert 0 < UNTOUCHED_BELOW_Y <= ymin, (
+        f"UNTOUCHED_BELOW_Y={UNTOUCHED_BELOW_Y} must sit above the subtitle area "
+        f"top ({ymin}); pass it as arg 8 for this video"
+    )
 
     from backend.tools.subtitle_detect import SubtitleDetect
 

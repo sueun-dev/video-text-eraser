@@ -38,6 +38,15 @@ def test_build_mask_no_areas_blank():
     assert not build_mask(40, 40, [], padding=4).any()
 
 
+def test_build_mask_overlapping_areas_union_not_xor_or_overflow():
+    # Two overlapping areas: the shared region must stay opaque (255), not be
+    # XOR-cancelled to 0 or uint8-overflowed to 254. Mask must stay binary.
+    m = build_mask(100, 100, [(10, 40, 10, 40), (30, 60, 30, 60)], padding=0)
+    assert m[35, 35] == 255                 # overlap stays opaque
+    assert m[15, 15] == 255 and m[55, 55] == 255
+    assert set(np.unique(m)).issubset({0, 255})
+
+
 # --------------------------------------------------------------------------
 # feather_alpha
 # --------------------------------------------------------------------------
@@ -51,9 +60,16 @@ def test_feather_alpha_shape_and_range():
 
 def test_feather_alpha_core_opaque_edge_ramps():
     mask = build_mask(100, 200, [(30, 60, 50, 150)], padding=5)
-    alpha = feather_alpha(mask, feather=6)
-    assert alpha[45, 100, 0] > 0.99      # core fully opaque
-    assert alpha[5, 5, 0] < 0.01         # far outside fully transparent
+    alpha = feather_alpha(mask, feather=8)[..., 0]
+    assert alpha[45, 100] > 0.99         # core fully opaque
+    assert alpha[5, 5] < 0.01            # far outside fully transparent
+    # A genuine soft rim must exist (a hard-step mutant would have none)...
+    ramp = alpha[(alpha > 0.01) & (alpha < 0.99)]
+    assert ramp.size > 200
+    # ...and a column crossing the top edge must rise monotonically inward.
+    col = alpha[:45, 100]                # outside-top -> core row
+    assert col[0] < col[-1]
+    assert np.all(np.diff(col) >= -1e-6)
 
 
 def test_feather_zero_is_hard_mask():

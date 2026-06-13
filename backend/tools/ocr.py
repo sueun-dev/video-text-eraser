@@ -1,8 +1,8 @@
 """Helpers for converting OCR detection output into rectangular boxes."""
 
-from typing import List, Sequence, Tuple
+from typing import List, Sequence
 
-Box = Tuple[int, int, int, int]  # (xmin, xmax, ymin, ymax)
+from .constant import Box
 
 
 def get_coordinates(detection_polys: Sequence) -> List[Box]:

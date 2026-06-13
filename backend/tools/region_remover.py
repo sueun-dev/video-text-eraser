@@ -10,15 +10,14 @@ import os
 import subprocess
 import tempfile
 import traceback
-from typing import Callable, List, Optional, Tuple, TypedDict
+from typing import Callable, List, Optional, TypedDict
 
 import cv2
 import numpy as np
 
+from backend.tools.constant import Area
 from backend.tools.ffmpeg_cli import FFmpegCLI
 from backend.tools.video_io import FramePrefetcher, make_video_writer
-
-Area = Tuple[int, int, int, int]  # (ymin, ymax, xmin, xmax) absolute pixels
 
 # Extra pixels added around each area so anti-aliased edges are erased too.
 DEFAULT_PADDING = 8

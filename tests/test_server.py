@@ -36,25 +36,59 @@ def test_to_abs_areas_rounds():
     assert areas == [(11, 89, 0, 100)]
 
 
-def test_apply_settings_maps_onto_config():
-    snapshot = {
-        "pad": config.subtitleAreaDeviationPixel.value,
-        "stride": config.sttnNeighborStride.value,
-        "detect": config.subtitleDetectMode.value,
+def test_to_abs_areas_half_pixel_bankers_rounding():
+    # Pin Python's round-half-to-even so a future int(x+0.5) swap is caught:
+    # 0.5->0, 2.5->2, 1.5->2.
+    assert server._to_abs_areas([[0.005, 0.025, 0.015, 0.0]], 100, 100) == [(0, 2, 2, 0)]
+
+
+def test_to_abs_areas_empty():
+    assert server._to_abs_areas([], 100, 100) == []
+
+
+def test_apply_settings_maps_every_key_with_distinct_sentinels():
+    # Distinct sentinel per key so a swapped/copy-paste mapping is caught.
+    items = {
+        "maskPadding": config.subtitleAreaDeviationPixel,
+        "sttnNeighborStride": config.sttnNeighborStride,
+        "sttnReferenceLength": config.sttnReferenceLength,
+        "sttnMaxLoadNum": config.sttnMaxLoadNum,
+        "propainterMaxLoadNum": config.propainterMaxLoadNum,
+        "timelineBackward": config.subtitleTimelineBackwardFrameCount,
+        "timelineForward": config.subtitleTimelineForwardFrameCount,
     }
+    sentinels = {"maskPadding": 31, "sttnNeighborStride": 32, "sttnReferenceLength": 33,
+                 "sttnMaxLoadNum": 34, "propainterMaxLoadNum": 35,
+                 "timelineBackward": 36, "timelineForward": 37}
+    snapshot = {k: item.value for k, item in items.items()}
+    snap_detect = config.subtitleDetectMode.value
+    snap_hw = config.hardwareAcceleration.value
     try:
-        server._apply_settings({
-            "maskPadding": 17,
-            "sttnNeighborStride": 9,
-            "detectModel": "mobile",
-        })
-        assert config.subtitleAreaDeviationPixel.value == 17
-        assert config.sttnNeighborStride.value == 9
+        server._apply_settings({**sentinels, "detectModel": "mobile",
+                                "hardwareAcceleration": 0})
+        for key, item in items.items():
+            assert item.value == sentinels[key], f"{key} mapped to the wrong config item"
         assert config.subtitleDetectMode.value == SubtitleDetectMode.PP_OCRv5_MOBILE
+        assert config.hardwareAcceleration.value is False
+        server._apply_settings({"detectModel": "server", "hardwareAcceleration": 1})
+        assert config.subtitleDetectMode.value == SubtitleDetectMode.PP_OCRv5_SERVER
+        assert config.hardwareAcceleration.value is True
     finally:
-        config.subtitleAreaDeviationPixel.value = snapshot["pad"]
-        config.sttnNeighborStride.value = snapshot["stride"]
-        config.subtitleDetectMode.value = snapshot["detect"]
+        for k, item in items.items():
+            item.value = snapshot[k]
+        config.subtitleDetectMode.value = snap_detect
+        config.hardwareAcceleration.value = snap_hw
+
+
+def test_apply_settings_coerces_string_ints_and_ignores_absent():
+    snap = config.subtitleAreaDeviationPixel.value
+    try:
+        server._apply_settings({"maskPadding": "12"})   # string -> int
+        assert config.subtitleAreaDeviationPixel.value == 12
+        server._apply_settings({})                       # no keys -> no change
+        assert config.subtitleAreaDeviationPixel.value == 12
+    finally:
+        config.subtitleAreaDeviationPixel.value = snap
 
 
 # --------------------------------------------------------------------------

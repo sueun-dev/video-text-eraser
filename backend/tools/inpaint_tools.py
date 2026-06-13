@@ -6,10 +6,7 @@ import cv2
 import numpy as np
 
 from backend.config import config
-
-Box = Tuple[int, int, int, int]            # (xmin, xmax, ymin, ymax)
-Band = Tuple[int, int, int, int]           # (ymin, ymax, xmin, xmax)
-FrameRange = Tuple[int, int]               # inclusive (start, end)
+from backend.tools.constant import Band, Box, FrameRange
 
 # Connected components smaller than this many pixels are treated as noise.
 _MIN_ISLAND_AREA = 10
