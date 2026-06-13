@@ -159,6 +159,14 @@ python3.12 -m venv .venv
 .venv/bin/python test/verify_removal.py input.mp4 output.mp4 [ymin ymax xmin xmax]
 ```
 
+`test/verify_all_modes.py`는 5가지 인페인트 모드를 모두 실행해 각각 자막을
+제거하는지 한 번에 검증합니다 (모드별 래퍼 회귀 방지). ProPainter는 CPU에서
+느리므로 `MODES` 환경변수로 제한할 수 있습니다.
+
+```bash
+MODES=opencv,lama .venv/bin/python test/verify_all_modes.py
+```
+
 ## 라이선스
 
 [Apache License 2.0](LICENSE) — 이 프로젝트가 파생된 원본과 동일합니다.
