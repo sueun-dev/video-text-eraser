@@ -404,7 +404,10 @@ class SubtitleRemover:
         """
         max_tall_box = config.subtitleYXAxisDifferencePixel.value
         boxes = []
-        for frame_no in range(run_start, run_end):
+        # The run is inclusive of run_end (its frame is read and inpainted), so
+        # its boxes must be in the mask too — otherwise a subtitle that only
+        # appears on the final frame survives.
+        for frame_no in range(run_start, run_end + 1):
             for box in frame_boxes.get(frame_no, []):
                 xmin, xmax, ymin, ymax = box
                 if (ymax - ymin) - (xmax - xmin) > max_tall_box:

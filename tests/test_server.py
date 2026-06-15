@@ -3,6 +3,7 @@
 import cv2
 import numpy as np
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.config import InpaintMode, SubtitleDetectMode, config
@@ -44,6 +45,44 @@ def test_to_abs_areas_half_pixel_bankers_rounding():
 
 def test_to_abs_areas_empty():
     assert server._to_abs_areas([], 100, 100) == []
+
+
+def test_to_abs_areas_rejects_non_finite():
+    # inf/NaN must become a clean 400, not crash the handler with a 500.
+    for bad in (float("inf"), float("nan"), float("-inf")):
+        with pytest.raises(HTTPException) as exc:
+            server._to_abs_areas([[bad, 0.5, 0.0, 1.0]], 100, 100)
+        assert exc.value.status_code == 400
+
+
+def test_to_abs_areas_rejects_wrong_arity():
+    with pytest.raises(HTTPException) as exc:
+        server._to_abs_areas([[0.1, 0.2, 0.3]], 100, 100)   # only 3 values
+    assert exc.value.status_code == 400
+
+
+def test_frame_negative_width_does_not_crash(client, synth_video):
+    meta = _upload_synth(client, synth_video)
+    res = client.get(f"/api/frame/{meta['file_id']}?index=0&width=-5")
+    assert res.status_code == 200                # full frame, no cv2 crash
+    img = cv2.imdecode(np.frombuffer(res.content, np.uint8), cv2.IMREAD_COLOR)
+    assert img is not None and img.shape[1] == meta["width"]
+
+
+def test_process_rejects_malformed_area(client, synth_video):
+    meta = _upload_synth(client, synth_video)
+    res = client.post("/api/process", json={
+        "file_id": meta["file_id"], "mode": "opencv", "areas": [[0.1, 0.2, 0.3]],
+    })
+    assert res.status_code == 400
+
+
+def test_upload_oversize_rejected_by_content_length(client, monkeypatch):
+    # The Content-Length middleware rejects before the body is spooled to disk.
+    monkeypatch.setattr(server, "MAX_UPLOAD_BYTES", 100)
+    res = client.post("/api/upload",
+                      files={"file": ("big.mp4", b"\x00" * 4096, "video/mp4")})
+    assert res.status_code == 413
 
 
 def test_apply_settings_maps_every_key_with_distinct_sentinels():

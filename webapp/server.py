@@ -5,6 +5,7 @@ Then open  http://127.0.0.1:8765
 """
 # ruff: noqa: E402  -- sys.path/chdir must precede backend imports
 
+import math
 import os
 import sys
 import threading
@@ -19,8 +20,8 @@ os.chdir(ROOT)  # config/ and model paths are resolved relative to the repo root
 
 import cv2
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -75,6 +76,22 @@ MODE_MAP = {
 }
 
 app = FastAPI(title="Video Text Eraser")
+
+
+@app.middleware("http")
+async def _limit_upload_size(request: Request, call_next):
+    """Reject oversize uploads by Content-Length *before* the body is parsed.
+
+    Starlette spools the whole multipart body to a temp file before the upload
+    handler runs, so the in-handler streaming cap cannot prevent disk fill on
+    its own; this header check stops it earlier. The streaming cap remains as
+    defense-in-depth for requests that omit/forge Content-Length.
+    """
+    if request.url.path == "/api/upload":
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > MAX_UPLOAD_BYTES:
+            return JSONResponse({"detail": "file too large"}, status_code=413)
+    return await call_next(request)
 
 FILES: Dict[str, dict] = {}   # file_id -> {path, kind, meta}
 JOBS: Dict[str, "Job"] = {}
@@ -176,9 +193,17 @@ def _image_media_type(suffix: str) -> str:
 
 
 def _to_abs_areas(areas_norm: List[List[float]], width: int, height: int):
-    """Normalized [ymin,ymax,xmin,xmax] floats -> absolute pixel tuples."""
+    """Normalized [ymin,ymax,xmin,xmax] floats -> absolute pixel tuples.
+
+    Rejects malformed input (wrong arity, NaN/inf) with a 400 instead of
+    letting it crash the handler with a 500.
+    """
     result = []
-    for ymin, ymax, xmin, xmax in areas_norm:
+    for area in areas_norm:
+        if (len(area) != 4
+                or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in area)):
+            raise HTTPException(400, "each area must be 4 finite numbers [ymin,ymax,xmin,xmax]")
+        ymin, ymax, xmin, xmax = area
         result.append((
             int(round(ymin * height)), int(round(ymax * height)),
             int(round(xmin * width)), int(round(xmax * width)),
@@ -354,9 +379,9 @@ async def upload(file: UploadFile = File(...)):
 def frame(file_id: str, index: int = 0, width: int = 0):
     entry = _file_or_404(file_id)
     img = _read_frame(entry, index)
-    if width and img.shape[1] > width:
+    if width > 0 and img.shape[1] > width:   # width<=0 -> no downscale (full frame)
         scale = width / img.shape[1]
-        img = cv2.resize(img, (width, int(img.shape[0] * scale)))
+        img = cv2.resize(img, (width, max(1, int(img.shape[0] * scale))))
     ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
     if not ok:
         raise HTTPException(500, "encode failed")

@@ -13,10 +13,20 @@ def test_collect_run_boxes_unions_and_dedups():
     a = (0, 100, 50, 70)   # wide box (xmin,xmax,ymin,ymax) -> a subtitle line
     b = (0, 120, 50, 70)
     frame_boxes = {1: [a], 2: [a, b], 3: [b]}
-    # range is [run_start, run_end); frame 3 excluded by design.
     result = sr._collect_run_boxes(frame_boxes, 1, 3)
     assert a in result and b in result
     assert len(result) == 2          # deduped despite appearing twice
+
+
+def test_collect_run_boxes_includes_the_final_frame():
+    # Regression: the run is inclusive of run_end, so a box that appears ONLY on
+    # the last frame must still be in the mask (else it survives inpainting).
+    sr = _bare_remover()
+    a = (0, 100, 50, 70)
+    last_only = (0, 120, 200, 220)
+    frame_boxes = {1: [a], 2: [a], 3: [last_only]}
+    result = sr._collect_run_boxes(frame_boxes, 1, 3)
+    assert last_only in result
 
 
 def test_collect_run_boxes_drops_tall_false_detections():

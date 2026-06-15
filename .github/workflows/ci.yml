@@ -34,7 +34,7 @@ jobs:
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install -r requirements.txt
           pip install fastapi uvicorn python-multipart httpx imageio-ffmpeg
-          pip install pytest ruff
+          pip install pytest ruff pyright
 
       - name: Lint (ruff)
         run: |
@@ -44,6 +44,9 @@ jobs:
             --exclude backend/inpaint/sttn \
             --exclude backend/inpaint/utils \
             --exclude backend/tools/train
+
+      - name: Type check (pyright)
+        run: pyright
 
       - name: Unit tests (hermetic)
         run: pytest tests/ -m "not slow" -q
