@@ -215,13 +215,19 @@ class STTNAutoInpaint:
                 start_f = chunk * clip_gap
                 end_f = min((chunk + 1) * clip_gap, info["len"])
                 tqdm.write(f"Processing: {start_f + 1} - {end_f} / Total: {info['len']}")
-                self._process_chunk(
+                reached_eof = self._process_chunk(
                     prefetcher, writer, mask, bands, start_f, end_f,
                     info, ab_sections, input_sub_remover, tbar,
                 )
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+                # Stop once the source is exhausted: reading another chunk would
+                # block forever on the prefetcher (its single EOF sentinel is
+                # already consumed). Guards against frame-count metadata that
+                # over-counts the real frames.
+                if reached_eof:
+                    break
         finally:
             prefetcher.release()
             if writer is not None:
@@ -230,18 +236,24 @@ class STTNAutoInpaint:
     def _process_chunk(
         self, prefetcher, writer, mask, bands, start_f, end_f,
         info, ab_sections, sub_remover, tbar,
-    ) -> None:
-        """Read one chunk of frames, restore its bands, and write results."""
+    ) -> bool:
+        """Read one chunk of frames, restore its bands, and write results.
+
+        Returns True if the source was exhausted mid-chunk (the caller must then
+        stop, as further reads would block on the prefetcher).
+        """
         frames_hr: List[np.ndarray] = []
         scaled: Dict[int, List[np.ndarray]] = {k: [] for k in range(len(bands))}
         # Maps chunk-relative frame index -> index into the inpainted band list
         # (only frames inside the A/B sections are inpainted).
         inpainted_index: Dict[int, int] = {}
+        reached_eof = False
 
         for j in range(start_f, end_f):
             success, frame = prefetcher.read()
             if not success:
                 print(f"Warning: Failed to read frame {j}.")
+                reached_eof = True
                 break
             frames_hr.append(frame)
             if is_frame_number_in_ab_sections(j, ab_sections):
@@ -258,7 +270,7 @@ class STTNAutoInpaint:
 
         if not frames_hr:
             print(f"Warning: No valid frames found in range {start_f + 1}-{end_f}.")
-            return
+            return reached_eof
 
         restored_bands = {
             k: self.sttn_inpaint.inpaint(scaled[k]) if scaled[k] else []
@@ -290,3 +302,4 @@ class STTNAutoInpaint:
                     sub_remover.update_progress(tbar, increment=1)
                 if preview_original is not None:
                     sub_remover.update_preview_with_comp(preview_original, frame)
+        return reached_eof
