@@ -423,7 +423,12 @@ class SubtitleRemover:
     def _run_propainter(self, tbar) -> None:
         """Detection-driven ProPainter; single frames fall back to LaMa."""
         frame_boxes, runs = self._detect_subtitle_runs(for_propainter=True)
-        run_end_by_start: Dict[int, int] = {start: end for start, end in runs}
+        # Clamp run ends to the real frame count (same reason as the detection
+        # path): an over-long inner read consumes the prefetcher's single EOF
+        # sentinel and deadlocks the outer read loop.
+        run_end_by_start: Dict[int, int] = {
+            start: min(end, self.frame_count) for start, end in runs
+        }
 
         device = (
             self.hardware_accelerator.device
