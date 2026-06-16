@@ -20,7 +20,11 @@ from backend.config import config
 from backend.inpaint.sttn.auto_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 from backend.tools.hardware_accelerator import HardwareAccelerator
-from backend.tools.inpaint_tools import get_inpaint_area_by_mask, is_frame_number_in_ab_sections
+from backend.tools.inpaint_tools import (
+    composite_band,
+    get_inpaint_area_by_mask,
+    is_frame_number_in_ab_sections,
+)
 from backend.tools.video_io import FramePrefetcher, make_video_writer
 
 _compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
@@ -81,9 +85,8 @@ class STTNInpaint:
             for k, (ymin, ymax, _, _) in enumerate(bands):
                 restored = cv2.resize(restored_bands[k][j], (frame_width, ymax - ymin))
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
-                band_mask = mask[ymin:ymax, :]
-                frame[ymin:ymax, :, :] = (
-                    band_mask * restored + (1 - band_mask) * frame[ymin:ymax, :, :]
+                frame[ymin:ymax, :, :] = composite_band(
+                    frame[ymin:ymax, :, :], restored, mask[ymin:ymax, :]
                 )
         return frames
 
@@ -295,9 +298,8 @@ class STTNAutoInpaint:
                         restored_bands[k][comp_idx], (info["W_ori"], ymax - ymin)
                     )
                     restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
-                    band_mask = mask[ymin:ymax, :]
-                    frame[ymin:ymax, :, :] = (
-                        band_mask * restored + (1 - band_mask) * frame[ymin:ymax, :, :]
+                    frame[ymin:ymax, :, :] = composite_band(
+                        frame[ymin:ymax, :, :], restored, mask[ymin:ymax, :]
                     )
             writer.write(frame)
             if sub_remover is not None:
