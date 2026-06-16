@@ -42,7 +42,6 @@ class AdvancedSettingInterface(ScrollArea):
     def setup_layout(self):
         self.subtitle_detection_group.addSettingCard(self.subtitle_yx_axis_difference_pixel)
         self.subtitle_detection_group.addSettingCard(self.subtitle_area_deviation_pixel)
-        self.subtitle_detection_group.addSettingCard(self.subtitle_area_y_axis_difference_pixel)
         self.subtitle_detection_group.addSettingCard(self.subtitle_area_pixel_tolerance_y_pixel)
         self.subtitle_detection_group.addSettingCard(self.subtitle_area_pixel_tolerance_x_pixel)
         self.subtitle_detection_group.addSettingCard(self.subtitle_timeline_backward_frame_count)
@@ -98,14 +97,6 @@ class AdvancedSettingInterface(ScrollArea):
             parent=self.subtitle_detection_group
         )
         
-        self.subtitle_area_y_axis_difference_pixel = RangeSettingCard(
-            configItem=config.subtitleAreaYAxisDifferencePixel,
-            icon=FluentIcon.ALIGNMENT,
-            title=tr["Setting"]["SubtitleAreaYAxisDifferencePixel"],
-            content=tr["Setting"]["SubtitleAreaYAxisDifferencePixelDesc"],
-            parent=self.subtitle_detection_group
-        )
-
         self.subtitle_area_pixel_tolerance_y_pixel = RangeSettingCard(
             configItem=config.subtitleAreaPixelToleranceYPixel,
             icon=FluentIcon.UP,

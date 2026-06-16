@@ -89,10 +89,6 @@ class Config(QConfig):
     subtitleAreaDeviationPixel = RangeConfigItem(
         "Main", "SubtitleAreaDeviationPixel", 10, RangeValidator(1, 300)
     )
-    # Two boxes within this vertical distance count as the same subtitle line.
-    subtitleAreaYAxisDifferencePixel = RangeConfigItem(
-        "Main", "SubtitleAreaYAxisDifferencePixel", 20, RangeValidator(0, 300)
-    )
     # X/Y tolerances for deciding two boxes are the same text region.
     subtitleAreaPixelToleranceYPixel = RangeConfigItem(
         "Main", "SubtitleAreaPixelToleranceYPixel", 20, RangeValidator(0, 300)
