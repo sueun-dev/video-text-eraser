@@ -77,6 +77,70 @@ def test_detection_loop_terminates_when_run_exceeds_real_frames(synth_video, mon
     sr.video_writer.release()
 
 
+class _RecordModel:
+    """Stub inpaint model that records how many frames it was given."""
+    def __init__(self):
+        self.total = 0
+
+    def __call__(self, frames, mask):
+        self.total += len(frames)
+        return list(frames)
+
+
+def test_detection_processes_all_frames_when_metadata_undercounts(synth_video, monkeypatch):
+    # Correctness regression: CAP_PROP_FRAME_COUNT can UNDER-count (VBR/streamed
+    # mp4). The run end must NOT be clamped to it, or later subtitled frames are
+    # written verbatim with the subtitle still on them.
+    path = synth_video(frames=12, w=160, h=90)
+    sr = SubtitleRemover(path)
+    sr.sub_areas = [(0, 90, 0, 160)]
+    monkeypatch.setattr(sr, "frame_count", 5)   # under-counts the 12 real frames
+    box = (10, 150, 40, 60)
+    monkeypatch.setattr(sr, "_detect_subtitle_runs",
+                        lambda **k: ({i: [box] for i in range(1, 13)}, [(1, 12)]))
+
+    model = _RecordModel()
+    sr._run_detection_inpaint(_Bar(), model)
+    sr.video_cap.release()
+    sr.video_writer.release()
+    assert model.total == 12   # every subtitled frame reached the inpaint model
+
+
+def test_propainter_loop_terminates_on_overcounted_metadata(synth_video, monkeypatch):
+    # Deadlock regression for the ProPainter path (parallel to the detection one).
+    import threading
+
+    path = synth_video(frames=8, w=160, h=90)
+    sr = SubtitleRemover(path)
+    sr.sub_areas = [(0, 90, 0, 160)]
+    monkeypatch.setattr(sr, "frame_count", 100)   # over-counts the 8 real frames
+    box = (10, 150, 40, 60)
+    monkeypatch.setattr(sr, "_detect_subtitle_runs",
+                        lambda **k: ({i: [box] for i in range(1, 9)}, [(1, 100)]))
+
+    class _PP:
+        def __init__(self, *a, **k):
+            pass
+
+        def __call__(self, frames, mask):
+            return list(frames)
+
+    monkeypatch.setattr("backend.main.PropainterInpaint", _PP)
+
+    done = threading.Event()
+
+    def run():
+        try:
+            sr._run_propainter(_Bar())
+        finally:
+            done.set()
+
+    threading.Thread(target=run, daemon=True).start()
+    assert done.wait(timeout=20), "propainter reader loop deadlocked on over-long run"
+    sr.video_cap.release()
+    sr.video_writer.release()
+
+
 def test_run_does_not_mux_when_processing_fails(synth_video, monkeypatch):
     path = synth_video(frames=5, w=160, h=90)
     sr = SubtitleRemover(path)

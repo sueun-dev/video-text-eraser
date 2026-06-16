@@ -354,12 +354,12 @@ class SubtitleRemover:
         )
         tbar.write(f"Subtitle filter_and_merge_intervals: {runs}")
 
-        # Clamp run ends to the real frame count: an over-long inner read
-        # would consume the prefetcher's end sentinel and deadlock the
-        # outer loop.
-        run_end_by_start: Dict[int, int] = {
-            start: min(end, self.frame_count) for start, end in runs
-        }
+        # Do NOT clamp run ends to self.frame_count: CAP_PROP_FRAME_COUNT is an
+        # estimate that can UNDER-count (VBR/streamed mp4), and detection reads
+        # the real frames, so clamping would truncate a legitimate run and leave
+        # its later frames un-erased. The inner-loop EOF break below is what
+        # actually guards the prefetcher-sentinel deadlock.
+        run_end_by_start: Dict[int, int] = {start: end for start, end in runs}
 
         self.append_output(tr["Main"]["ProcessingStartRemovingSubtitles"])
         reader = FramePrefetcher(self.video_cap)
@@ -429,12 +429,10 @@ class SubtitleRemover:
     def _run_propainter(self, tbar) -> None:
         """Detection-driven ProPainter; single frames fall back to LaMa."""
         frame_boxes, runs = self._detect_subtitle_runs(for_propainter=True)
-        # Clamp run ends to the real frame count (same reason as the detection
-        # path): an over-long inner read consumes the prefetcher's single EOF
-        # sentinel and deadlocks the outer read loop.
-        run_end_by_start: Dict[int, int] = {
-            start: min(end, self.frame_count) for start, end in runs
-        }
+        # Not clamped to self.frame_count (see _run_detection_inpaint): an
+        # under-counting estimate would truncate a run and leave subtitles in.
+        # The inner-loop EOF break guards the prefetcher-sentinel deadlock.
+        run_end_by_start: Dict[int, int] = {start: end for start, end in runs}
 
         device = (
             self.hardware_accelerator.device

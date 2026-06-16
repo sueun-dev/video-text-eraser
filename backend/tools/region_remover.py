@@ -100,10 +100,19 @@ def analyze_region_motion(
     if len(frames) < 2:
         return _motion_result(True, 0.0, 0.0)
 
-    region_change = float(np.mean([
-        np.mean([np.abs(a - b).mean() for a, b in zip(crops[i], crops[i + 1])])
-        for i in range(len(crops) - 1)
-    ]))
+    # Skip empty crops: a degenerate area (ymin>=ymax or xmin>=xmax) yields a
+    # zero-size crop whose mean is NaN, which would poison the result (and is
+    # not valid JSON). An empty region is treated as unchanging.
+    per_frame_change = []
+    for i in range(len(crops) - 1):
+        diffs = [
+            float(np.abs(a - b).mean())
+            for a, b in zip(crops[i], crops[i + 1])
+            if a.size and b.size
+        ]
+        if diffs:
+            per_frame_change.append(float(np.mean(diffs)))
+    region_change = float(np.mean(per_frame_change)) if per_frame_change else 0.0
     frame_change = float(np.mean([
         np.abs(frames[i] - frames[i + 1]).mean() for i in range(len(frames) - 1)
     ]))

@@ -209,12 +209,18 @@ class STTNAutoInpaint:
             band_height = int(info["W_ori"] * _BAND_HEIGHT_RATIO)
             bands = get_inpaint_area_by_mask(info["W_ori"], info["H_ori"], band_height, mask)
             clip_gap = self._effective_clip_gap(info["W_ori"], info["H_ori"])
-            chunk_count = -(-info["len"] // clip_gap)  # ceiling division
 
-            for chunk in range(chunk_count):
+            # Read fixed-size chunks until the source is genuinely exhausted
+            # rather than a fixed chunk_count derived from info["len"]:
+            # CAP_PROP_FRAME_COUNT is an estimate that can both under-count
+            # (which would truncate the output and desync the audio) and
+            # over-count (which the EOF break handles). info["len"] is only a
+            # progress hint here.
+            chunk = 0
+            while True:
                 start_f = chunk * clip_gap
-                end_f = min((chunk + 1) * clip_gap, info["len"])
-                tqdm.write(f"Processing: {start_f + 1} - {end_f} / Total: {info['len']}")
+                end_f = start_f + clip_gap
+                tqdm.write(f"Processing: {start_f + 1} - {end_f} / ~{info['len']}")
                 reached_eof = self._process_chunk(
                     prefetcher, writer, mask, bands, start_f, end_f,
                     info, ab_sections, input_sub_remover, tbar,
@@ -222,12 +228,9 @@ class STTNAutoInpaint:
                 gc.collect()
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
-                # Stop once the source is exhausted: reading another chunk would
-                # block forever on the prefetcher (its single EOF sentinel is
-                # already consumed). Guards against frame-count metadata that
-                # over-counts the real frames.
                 if reached_eof:
                     break
+                chunk += 1
         finally:
             prefetcher.release()
             if writer is not None:
