@@ -13,7 +13,7 @@ import torch
 from PIL import Image
 
 from backend.inpaint.utils.lama_util import get_image, pad_img_to_modulo, prepare_img_and_mask
-from backend.tools.inpaint_tools import get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
 
 # LaMa's convolutional stack requires inputs padded to a multiple of 8.
 _PAD_MODULO = 8
@@ -115,7 +115,10 @@ class LamaInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, _, _) in enumerate(bands):
-                frame[ymin:ymax, :, :] = restored_bands[k][j]
+                frame[ymin:ymax, :, :] = composite_band(
+                    frame[ymin:ymax, :, :], restored_bands[k][j], mask[ymin:ymax, :, :],
+                    refine_strokes=True,
+                )
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

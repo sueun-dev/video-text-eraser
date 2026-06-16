@@ -21,7 +21,7 @@ from backend.inpaint.video.core.utils import to_tensors
 from backend.inpaint.video.model.modules.flow_comp_raft import RAFT_bi
 from backend.inpaint.video.model.propainter import InpaintGenerator
 from backend.inpaint.video.model.recurrent_flow_completion import RecurrentFlowCompleteNet
-from backend.tools.inpaint_tools import get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
 
 warnings.filterwarnings("ignore")
 
@@ -109,8 +109,12 @@ class PropainterInpaint:
         self.sub_video_length = sub_video_length
         # Local temporal window size for the transformer.
         self.neighbor_length = 10
-        # Dilation iterations applied to the inpaint/flow masks.
-        self.mask_dilation = 4
+        # Dilation iterations applied to the masks. Upstream ProPainter dilates
+        # the flow mask more aggressively (8) than the inpaint mask (5) so RAFT
+        # never samples flow across the hole boundary; matching that removes the
+        # residual edge artifacts a single value of 4 left behind.
+        self.flow_mask_dilation = 8
+        self.mask_dilation = 5
         # Stride between sampled global reference frames.
         self.ref_stride = 10
         # RAFT refinement iterations.
@@ -146,7 +150,7 @@ class PropainterInpaint:
         w, h = pil_frames[0].size
         flow_mask_imgs, mask_imgs = _prepare_masks(
             mask, len(pil_frames),
-            flow_mask_dilates=self.mask_dilation, mask_dilates=self.mask_dilation,
+            flow_mask_dilates=self.flow_mask_dilation, mask_dilates=self.mask_dilation,
         )
 
         frames_inp = [np.array(f).astype(np.uint8) for f in pil_frames]
@@ -359,5 +363,8 @@ class PropainterInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, xmin, xmax) in enumerate(bands):
-                frame[ymin:ymax, xmin:xmax, :] = restored_bands[k][j]
+                frame[ymin:ymax, xmin:xmax, :] = composite_band(
+                    frame[ymin:ymax, xmin:xmax, :], restored_bands[k][j],
+                    mask[ymin:ymax, xmin:xmax, :], refine_strokes=True,
+                )
         return frames

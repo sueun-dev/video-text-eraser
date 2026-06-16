@@ -16,7 +16,7 @@ from torchvision import transforms
 from backend.config import config
 from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
-from backend.tools.inpaint_tools import get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
 
 _compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
 
@@ -78,7 +78,10 @@ class STTNDetInpaint:
             for k, (ymin, ymax, _, _) in enumerate(bands):
                 restored = cv2.resize(restored_bands[k][j], (frame_width, ymax - ymin))
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
-                frame[ymin:ymax, :, :] = restored
+                frame[ymin:ymax, :, :] = composite_band(
+                    frame[ymin:ymax, :, :], restored, mask[ymin:ymax, :, :],
+                    refine_strokes=True,
+                )
         return frames
 
     def _reference_frame_ids(self, neighbor_ids: List[int], length: int) -> List[int]:

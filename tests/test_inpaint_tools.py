@@ -6,10 +6,12 @@ from backend.config import config
 from backend.tools.inpaint_tools import (
     _align_to_multiple,
     batch_generator,
+    composite_band,
     create_mask,
     expand_frame_ranges,
     get_inpaint_area_by_mask,
     is_frame_number_in_ab_sections,
+    refine_box_to_strokes,
 )
 
 
@@ -240,3 +242,69 @@ def test_expand_single_range():
 def test_expand_unsorted_input_is_sorted():
     out = expand_frame_ranges([(40, 50), (10, 20)], 2, 2)
     assert out == sorted(out)
+
+
+# --------------------------------------------------------------------------
+# composite_band / refine_box_to_strokes
+# --------------------------------------------------------------------------
+
+
+def _band_with_text():
+    """A flat-grey band with a bright horizontal bar standing in for a glyph."""
+    band = np.full((60, 200, 3), 120, dtype=np.uint8)
+    band[28:32, 40:160] = 240  # high-contrast "stroke"
+    box = np.zeros((60, 200), dtype=np.uint8)
+    box[20:40, 30:170] = 1  # filled detection box around the bar
+    return band, box
+
+
+def test_composite_band_keeps_pixels_outside_the_mask():
+    orig = np.full((40, 50, 3), 100, dtype=np.uint8)
+    restored = np.full((40, 50, 3), 0, dtype=np.uint8)
+    mask = np.zeros((40, 50), dtype=np.uint8)
+    mask[10:20, 10:20] = 1
+    out = composite_band(orig, restored, mask, feather=0)
+    # A corner far from the mask must be the untouched original.
+    assert out[0, 0].tolist() == [100, 100, 100]
+    # The mask centre takes the restored value.
+    assert out[15, 15].tolist() == [0, 0, 0]
+
+
+def test_composite_band_feather_is_a_soft_ramp():
+    orig = np.zeros((40, 40, 3), dtype=np.uint8)
+    restored = np.full((40, 40, 3), 255, dtype=np.uint8)
+    mask = np.zeros((40, 40), dtype=np.uint8)
+    mask[10:30, 10:30] = 1
+    out = composite_band(orig, restored, mask, feather=4)
+    # Just outside the hard mask edge the alpha is partial, not 0 or 255.
+    assert 0 < int(out[9, 20, 0]) < 255
+
+
+def test_refine_box_to_strokes_shrinks_to_the_ink():
+    band, box = _band_with_text()
+    refined = refine_box_to_strokes(band, box)
+    assert refined.sum() < box.sum()  # narrowed
+    # Every true stroke pixel is still covered (no residual text).
+    assert refined[28:32, 40:160].all()
+
+
+def test_refine_strokes_preserves_background_between_letters():
+    band, box = _band_with_text()
+    restored = np.zeros_like(band)  # a "bad" fill, to expose any over-masking
+    out = composite_band(band, restored, box, refine_strokes=True)
+    # Background inside the box but clear of the stroke (+dilation+feather) is
+    # kept from the original, not hallucinated.
+    assert out[5, 5].tolist() == [120, 120, 120]      # well outside the box
+    assert out[21, 100].tolist() == [120, 120, 120]   # 7px above the stroke
+    assert out[30, 33].tolist() == [120, 120, 120]    # left of the stroke, in box
+    # The stroke itself is replaced by the fill.
+    assert int(out[30, 100, 0]) < 120
+
+
+def test_refine_box_to_strokes_falls_back_when_no_strokes():
+    flat = np.full((60, 200, 3), 120, dtype=np.uint8)  # no contrast at all
+    box = np.zeros((60, 200), dtype=np.uint8)
+    box[20:40, 30:170] = 1
+    refined = refine_box_to_strokes(flat, box)
+    # Degenerate segmentation must fall back to the full box, never erase it.
+    assert refined.sum() == box.sum()
