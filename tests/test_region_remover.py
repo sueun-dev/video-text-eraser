@@ -103,3 +103,15 @@ def test_analyze_single_frame_video_is_static(synth_video):
     path = synth_video(frames=1, w=160, h=90)
     result = analyze_region_motion(path, [(10, 40, 100, 150)])
     assert result["static"] is True
+
+
+def test_analyze_degenerate_area_is_finite_not_nan(synth_video):
+    # Regression: a degenerate area (ymin>=ymax) yields an empty crop whose mean
+    # is NaN; the result must stay finite/JSON-safe (it crashed /api/analyze).
+    import math
+
+    path = synth_video(frames=12, w=160, h=90)
+    result = analyze_region_motion(path, [(40, 40, 50, 60)])   # ymin == ymax
+    assert math.isfinite(result["region_change"])
+    assert result["static"] is True
+    assert result["recommended_mode"] == "lama-region"
