@@ -380,9 +380,11 @@ class SubtitleRemover:
             run_start, run_end = frame_index, run_end_by_start[frame_index]
             tbar.write(f"processing frame {run_start} to {run_end}")
             run_frames = [frame]
+            eof = False
             for _ in range(run_end - run_start):
                 ret, frame = reader.read()
                 if not ret:
+                    eof = True
                     break
                 frame_index += 1
                 run_frames.append(frame)
@@ -394,6 +396,10 @@ class SubtitleRemover:
                     self.video_writer.write(inpainted)
                     self._preview_masked(original, mask, inpainted)
                 self.update_progress(tbar, increment=len(batch))
+            # If the inner read hit EOF, the prefetcher's sole sentinel is spent;
+            # reading again in the outer loop would block forever.
+            if eof:
+                break
         reader.stop()
 
     def _collect_run_boxes(self, frame_boxes, run_start: int, run_end: int):
@@ -465,9 +471,11 @@ class SubtitleRemover:
 
             run_start = frame_index
             run_frames = [frame]
+            eof = False
             while frame_index < run_end:
                 ret, frame = reader.read()
                 if not ret:
+                    eof = True
                     break
                 frame_index += 1
                 run_frames.append(frame)
@@ -484,6 +492,9 @@ class SubtitleRemover:
                         self.video_writer.write(inpainted)
                         self._preview_masked(original, mask, inpainted)
                 self.update_progress(tbar, increment=len(batch))
+            # Inner read hit EOF -> sentinel spent -> stop before the outer read blocks.
+            if eof:
+                break
         reader.stop()
 
     # ------------------------------------------------------------------
