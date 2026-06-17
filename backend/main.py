@@ -42,10 +42,18 @@ from backend.tools.common_tools import (
 from backend.tools.constant import Area
 from backend.tools.ffmpeg_cli import FFmpegCLI
 from backend.tools.hardware_accelerator import HardwareAccelerator
-from backend.tools.inpaint_tools import batch_generator, create_mask, expand_frame_ranges
+from backend.tools.inpaint_tools import (
+    batch_generator,
+    composite_with_pde,
+    create_mask,
+    expand_frame_ranges,
+)
 from backend.tools.model_config import ModelConfig
 from backend.tools.subtitle_detect import SubtitleDetect
 from backend.tools.video_io import FramePrefetcher, make_video_writer
+
+
+_IMAGE_PDE_WEIGHT = 0.6
 
 
 class SubtitleRemover:
@@ -242,7 +250,10 @@ class SubtitleRemover:
 
         if boxes:
             mask = create_mask(original.shape[:2], boxes)
-            inpainted = self.lama_inpaint.inpaint(original, mask)
+            lama_fill = self.lama_inpaint.inpaint(original, mask)
+            # Same glyph-precise + Navier-Stokes real-background blend as the
+            # video path: fills only the strokes, keeps inter-letter background.
+            inpainted = composite_with_pde(original, lama_fill, mask, _IMAGE_PDE_WEIGHT)
             self._preview_masked(original, mask, inpainted)
         else:
             inpainted = original
