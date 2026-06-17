@@ -134,12 +134,15 @@ def pde_fill_strokes(band: np.ndarray, ink_mask: np.ndarray) -> np.ndarray:
     # stroke and beats NS on textured backgrounds; its slight per-frame jitter is
     # absorbed by temporal_fuse_strokes. NS is the fast fallback if unavailable.
     try:
-        from skimage.restoration import inpaint_biharmonic
+        from skimage.restoration import denoise_tv_chambolle, inpaint_biharmonic
 
-        filled = inpaint_biharmonic(
-            band.astype(np.float64) / 255.0, m.astype(bool), channel_axis=-1
-        )
-        return np.clip(filled * 255.0, 0, 255).astype(np.uint8)
+        bih = inpaint_biharmonic(band.astype(np.float64) / 255.0, m.astype(bool), channel_axis=-1)
+        seed = cv2.inpaint(band, m, 3, cv2.INPAINT_NS).astype(np.float32) / 255.0
+        outside = (m == 0)[:, :, None]
+        for _ in range(8):
+            seed = denoise_tv_chambolle(seed, weight=0.08, channel_axis=-1)
+            seed = np.where(outside, band.astype(np.float32) / 255.0, seed)
+        return np.clip((bih + seed) * 0.5 * 255.0, 0, 255).astype(np.uint8)
     except Exception:
         return cv2.inpaint(band, m, 3, cv2.INPAINT_NS)
 
