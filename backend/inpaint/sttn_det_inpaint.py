@@ -16,7 +16,13 @@ from torchvision import transforms
 from backend.config import config
 from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
-from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask, guided_upsample
+from backend.tools.inpaint_tools import (
+    composite_band,
+    get_inpaint_area_by_mask,
+    guided_upsample,
+    pde_fill_strokes,
+    refine_box_to_strokes,
+)
 
 _compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
 
@@ -25,6 +31,9 @@ def _to_tensors(frames) -> torch.Tensor:
     """Stack frames into a single normalized tensor (typed wrapper over Compose)."""
     return _compose(frames)
 
+# Weight of the Navier-Stokes real-background fill when blended with the model
+# fill. 0.5 maximises spatial fidelity while keeping flicker below the model's.
+_PDE_WEIGHT = 0.5
 # Input resolution expected by the pretrained detection-mode checkpoint.
 _MODEL_INPUT_WIDTH = 432
 _MODEL_INPUT_HEIGHT = 240
@@ -76,6 +85,8 @@ class STTNDetInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, _, _) in enumerate(bands):
+                orig = frame[ymin:ymax, :, :].copy()
+                box = mask[ymin:ymax, :, :]
                 # Lanczos preserves more edge energy than bilinear on the ~2x
                 # upscale from the model's 432-wide band to full width.
                 restored = cv2.resize(
@@ -84,11 +95,20 @@ class STTNDetInpaint:
                 )
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
                 # Re-inject the original band's high-frequency detail lost in the
-                # downscale->upscale round-trip (guide is still the original here).
-                restored = guided_upsample(restored, frame[ymin:ymax, :, :])
+                # downscale->upscale round-trip.
+                restored = guided_upsample(restored, orig)
+                # Blend the model fill with a Navier-Stokes interpolation of the
+                # real background under the thin glyph strokes: NS adds spatial
+                # fidelity, the model keeps frames temporally coherent, and
+                # averaging their uncorrelated errors lowers flicker too.
+                ink = refine_box_to_strokes(orig, box)
+                ns = pde_fill_strokes(orig, ink)
+                fill = (
+                    ns.astype(np.float32) * _PDE_WEIGHT
+                    + restored.astype(np.float32) * (1.0 - _PDE_WEIGHT)
+                )
                 frame[ymin:ymax, :, :] = composite_band(
-                    frame[ymin:ymax, :, :], restored, mask[ymin:ymax, :, :],
-                    refine_strokes=True,
+                    orig, fill, box, precomputed_mask=ink
                 )
         return frames
 
