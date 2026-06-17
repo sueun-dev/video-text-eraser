@@ -13,13 +13,15 @@ import torch
 from PIL import Image
 
 from backend.inpaint.utils.lama_util import get_image, pad_img_to_modulo, prepare_img_and_mask
-from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_with_pde, get_inpaint_area_by_mask
 
 # LaMa's convolutional stack requires inputs padded to a multiple of 8.
 _PAD_MODULO = 8
 # Frames per forward pass when batching; keeps peak memory bounded.
 _MINI_BATCH_SIZE = 4
 # Height of the band handed to the model, as a fraction of frame width.
+# Navier-Stokes blend weight; LaMa has no temporal model, so favour the PDE.
+_PDE_WEIGHT = 0.6
 _BAND_HEIGHT_RATIO = 3 / 16
 
 
@@ -115,9 +117,12 @@ class LamaInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, _, _) in enumerate(bands):
-                frame[ymin:ymax, :, :] = composite_band(
-                    frame[ymin:ymax, :, :], restored_bands[k][j], mask[ymin:ymax, :, :],
-                    refine_strokes=True,
+                orig = frame[ymin:ymax, :, :].copy()
+                # LaMa is single-frame and flickers on its own, so lean harder on
+                # the Navier-Stokes real-background fill (it follows the genuine,
+                # temporally-consistent neighbours).
+                frame[ymin:ymax, :, :] = composite_with_pde(
+                    orig, restored_bands[k][j], mask[ymin:ymax, :, :], _PDE_WEIGHT
                 )
 
         if torch.cuda.is_available():

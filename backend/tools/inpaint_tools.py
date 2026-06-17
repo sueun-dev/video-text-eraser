@@ -184,6 +184,30 @@ def composite_band(
     return np.clip(blended, 0, 255).astype(np.uint8)
 
 
+def composite_with_pde(
+    orig_band: np.ndarray,
+    model_fill: np.ndarray,
+    box_mask: np.ndarray,
+    ns_weight: float,
+) -> np.ndarray:
+    """Composite a model fill blended with a Navier-Stokes real-background fill.
+
+    Segments the glyph strokes once, then blends the model's fill with a PDE
+    interpolation of the real surrounding pixels (``ns_weight`` toward the PDE).
+    The PDE adds spatial fidelity, the model keeps frames temporally coherent,
+    and averaging their uncorrelated per-frame errors lowers flicker below
+    either alone. Shared by the OCR-text inpaint wrappers (STTN-det/LaMa/
+    ProPainter); the watermark/user-region path keeps the plain composite.
+    """
+    ink = refine_box_to_strokes(orig_band, box_mask)
+    ns = pde_fill_strokes(orig_band, ink)
+    fill = (
+        ns.astype(np.float32) * ns_weight
+        + model_fill.astype(np.float32) * (1.0 - ns_weight)
+    )
+    return composite_band(orig_band, fill, box_mask, precomputed_mask=ink)
+
+
 def create_mask(size: Tuple[int, int], boxes: Iterable[Box]) -> np.ndarray:
     """Render text boxes as a filled binary mask of the given (H, W) size.
 
