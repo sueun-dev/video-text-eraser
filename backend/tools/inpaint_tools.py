@@ -112,12 +112,34 @@ def guided_upsample(restored: np.ndarray, guide: np.ndarray, radius: int = 4,
     return np.clip(out * 255.0, 0, 255).astype(np.uint8)
 
 
+def pde_fill_strokes(band: np.ndarray, ink_mask: np.ndarray) -> np.ndarray:
+    """Fill thin glyph strokes by interpolating the real surrounding pixels.
+
+    Navier-Stokes inpainting (Bertalmío, Bertozzi & Sapiro 2001) solves a
+    fluid-dynamics analogue of the image where intensity plays the role of a
+    stream function: it propagates the surrounding isophotes (level lines) into
+    the hole, minimising a transport of the Laplacian along them. Once the mask
+    is the *thin* glyph strokes, the true background is locally smooth across
+    each stroke, so this real-pixel interpolation recovers it far better than a
+    downscaled model hallucination — and needs no model. Blended with the
+    temporal model fill it adds spatial fidelity while the model keeps frames
+    coherent.
+    """
+    m = (np.asarray(ink_mask) > 0).astype(np.uint8)
+    if m.ndim == 3:
+        m = m[:, :, 0]
+    if not m.any():
+        return band
+    return cv2.inpaint(band, m, 3, cv2.INPAINT_NS)
+
+
 def composite_band(
     orig_band: np.ndarray,
     restored_band: np.ndarray,
     mask_band: np.ndarray,
     feather: int = 10,
     refine_strokes: bool = False,
+    precomputed_mask: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Blend a restored band back over the original via a feathered text mask.
 
@@ -131,15 +153,23 @@ def composite_band(
     (see ``refine_box_to_strokes``), so background between and around letters is
     preserved exactly instead of hallucinated. Only enable it on the
     OCR-detection path, where the content is guaranteed high-contrast text.
+    ``precomputed_mask`` supplies an already-refined stroke mask so a caller that
+    needs it (e.g. for a PDE pre-fill) does not segment it twice.
     """
-    m = (mask_band > 0).astype(np.uint8)
+    if precomputed_mask is not None:
+        m = (np.asarray(precomputed_mask) > 0).astype(np.uint8)
+        feather = 2
+    else:
+        m = (mask_band > 0).astype(np.uint8)
+        if m.ndim == 3:
+            m = m[:, :, 0]
+        if refine_strokes:
+            m = refine_box_to_strokes(orig_band, m)
+            # Strokes are thin; the wide box feather would re-expand the mask, so
+            # use a narrow ramp that only softens the glyph edge.
+            feather = 2
     if m.ndim == 3:
         m = m[:, :, 0]
-    if refine_strokes:
-        m = refine_box_to_strokes(orig_band, m)
-        # Strokes are thin; the wide box feather would re-expand the mask, so use
-        # a narrow ramp that only softens the glyph edge.
-        feather = 2
     m = m.astype(np.float32)
     if feather > 0:
         k = feather * 2 + 1

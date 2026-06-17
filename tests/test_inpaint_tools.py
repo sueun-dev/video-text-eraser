@@ -13,6 +13,7 @@ from backend.tools.inpaint_tools import (
     get_inpaint_area_by_mask,
     guided_upsample,
     is_frame_number_in_ab_sections,
+    pde_fill_strokes,
     refine_box_to_strokes,
 )
 
@@ -348,3 +349,37 @@ def test_guided_upsample_sharpens_shared_structure():
     before = int(blurred[20, mid + 4, 0]) - int(blurred[20, mid - 4, 0])
     after = int(out[20, mid + 4, 0]) - int(out[20, mid - 4, 0])
     assert after >= before
+
+
+# --------------------------------------------------------------------------
+# pde_fill_strokes
+# --------------------------------------------------------------------------
+
+
+def test_pde_fill_removes_stroke_using_real_neighbours():
+    # A flat band with a bright stroke: NS inpainting must replace the stroke
+    # with the surrounding background value, not leave it.
+    band = np.full((40, 80, 3), 100, dtype=np.uint8)
+    band[18:22, 20:60] = 240
+    ink = np.zeros((40, 80), dtype=np.uint8)
+    ink[18:22, 20:60] = 1
+    out = pde_fill_strokes(band, ink)
+    assert abs(int(out[20, 40, 0]) - 100) <= 8   # stroke filled from neighbours
+    assert out[0, 0].tolist() == [100, 100, 100]  # untouched elsewhere
+
+
+def test_pde_fill_empty_mask_is_noop():
+    band = np.random.randint(0, 255, (30, 50, 3), dtype=np.uint8)
+    out = pde_fill_strokes(band, np.zeros((30, 50), dtype=np.uint8))
+    assert np.array_equal(out, band)
+
+
+def test_composite_band_accepts_precomputed_mask():
+    orig = np.full((40, 50, 3), 100, dtype=np.uint8)
+    restored = np.zeros((40, 50, 3), dtype=np.uint8)
+    ink = np.zeros((40, 50), dtype=np.uint8)
+    ink[10:20, 10:20] = 1
+    out = composite_band(orig, restored, np.ones((40, 50), np.uint8),
+                         precomputed_mask=ink)
+    assert out[15, 15, 0] < 100          # restored inside the precomputed mask
+    assert out[0, 0].tolist() == [100, 100, 100]  # original outside it
