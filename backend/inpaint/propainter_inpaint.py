@@ -21,11 +21,13 @@ from backend.inpaint.video.core.utils import to_tensors
 from backend.inpaint.video.model.modules.flow_comp_raft import RAFT_bi
 from backend.inpaint.video.model.propainter import InpaintGenerator
 from backend.inpaint.video.model.recurrent_flow_completion import RecurrentFlowCompleteNet
-from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_with_pde, get_inpaint_area_by_mask
 
 warnings.filterwarnings("ignore")
 
 # Height of the band handed to the model, as a fraction of frame width.
+# Navier-Stokes blend weight (flow model + real-pixel PDE fill).
+_PDE_WEIGHT = 0.6
 _BAND_HEIGHT_RATIO = 3 / 16
 # ProPainter's architecture requires band dimensions divisible by 8.
 _SIZE_MULTIPLE = 8
@@ -365,8 +367,11 @@ class PropainterInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, xmin, xmax) in enumerate(bands):
-                frame[ymin:ymax, xmin:xmax, :] = composite_band(
-                    frame[ymin:ymax, xmin:xmax, :], restored_bands[k][j],
-                    mask[ymin:ymax, xmin:xmax, :], refine_strokes=True,
+                orig = frame[ymin:ymax, xmin:xmax, :].copy()
+                # Blend the flow-guided fill with a Navier-Stokes real-background
+                # interpolation of the thin strokes: spatial fidelity + the
+                # model's temporal coherence, with flicker-cancelling averaging.
+                frame[ymin:ymax, xmin:xmax, :] = composite_with_pde(
+                    orig, restored_bands[k][j], mask[ymin:ymax, xmin:xmax, :], _PDE_WEIGHT
                 )
         return frames

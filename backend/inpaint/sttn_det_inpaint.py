@@ -17,11 +17,9 @@ from backend.config import config
 from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 from backend.tools.inpaint_tools import (
-    composite_band,
+    composite_with_pde,
     get_inpaint_area_by_mask,
     guided_upsample,
-    pde_fill_strokes,
-    refine_box_to_strokes,
 )
 
 _compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
@@ -98,18 +96,9 @@ class STTNDetInpaint:
                 # downscale->upscale round-trip.
                 restored = guided_upsample(restored, orig)
                 # Blend the model fill with a Navier-Stokes interpolation of the
-                # real background under the thin glyph strokes: NS adds spatial
-                # fidelity, the model keeps frames temporally coherent, and
-                # averaging their uncorrelated errors lowers flicker too.
-                ink = refine_box_to_strokes(orig, box)
-                ns = pde_fill_strokes(orig, ink)
-                fill = (
-                    ns.astype(np.float32) * _PDE_WEIGHT
-                    + restored.astype(np.float32) * (1.0 - _PDE_WEIGHT)
-                )
-                frame[ymin:ymax, :, :] = composite_band(
-                    orig, fill, box, precomputed_mask=ink
-                )
+                # real background under the thin glyph strokes (spatial fidelity +
+                # temporal coherence, with flicker-cancelling averaging).
+                frame[ymin:ymax, :, :] = composite_with_pde(orig, restored, box, _PDE_WEIGHT)
         return frames
 
     def _reference_frame_ids(self, neighbor_ids: List[int], length: int) -> List[int]:
