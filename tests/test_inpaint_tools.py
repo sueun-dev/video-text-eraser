@@ -12,9 +12,11 @@ from backend.tools.inpaint_tools import (
     expand_frame_ranges,
     get_inpaint_area_by_mask,
     guided_upsample,
+    composite_run_pde,
     is_frame_number_in_ab_sections,
     pde_fill_strokes,
     refine_box_to_strokes,
+    temporal_fuse_strokes,
 )
 
 
@@ -383,3 +385,43 @@ def test_composite_band_accepts_precomputed_mask():
                          precomputed_mask=ink)
     assert out[15, 15, 0] < 100          # restored inside the precomputed mask
     assert out[0, 0].tolist() == [100, 100, 100]  # original outside it
+
+
+# --------------------------------------------------------------------------
+# temporal_fuse_strokes / composite_run_pde
+# --------------------------------------------------------------------------
+
+
+def test_temporal_fuse_strokes_preserves_shape_and_background():
+    # Three identical flat fills with one stroke region; fusion must keep shape
+    # and leave the non-stroke background exactly as it was.
+    fills = [np.full((40, 80, 3), 120, dtype=np.uint8) for _ in range(3)]
+    origs = [np.full((40, 80, 3), 120, dtype=np.uint8) for _ in range(3)]
+    masks = [np.zeros((40, 80), dtype=np.uint8) for _ in range(3)]
+    for m in masks:
+        m[18:22, 30:50] = 1
+    out = temporal_fuse_strokes(fills, origs, masks, window=1)
+    assert len(out) == 3
+    assert out[0].shape == (40, 80, 3)
+    assert out[1][0, 0].tolist() == [120, 120, 120]   # background untouched
+
+
+def test_temporal_fuse_single_frame_is_noop():
+    fills = [np.full((30, 50, 3), 100, dtype=np.uint8)]
+    out = temporal_fuse_strokes(fills, list(fills), [np.zeros((30, 50), np.uint8)], window=2)
+    assert np.array_equal(out[0], fills[0])
+
+
+def test_composite_run_pde_removes_stroke_and_keeps_background():
+    # A flat band with a bright stroke across three frames; the run composite
+    # must fill the stroke (toward background) and keep pixels outside it.
+    origs, models, box = [], [], np.ones((40, 80), np.uint8)
+    for _ in range(3):
+        band = np.full((40, 80, 3), 100, dtype=np.uint8)
+        band[18:22, 20:60] = 240
+        origs.append(band)
+        models.append(np.full((40, 80, 3), 90, dtype=np.uint8))
+    out = composite_run_pde(origs, models, box, ns_weight=0.5)
+    assert len(out) == 3
+    assert int(out[1][20, 40, 0]) < 200          # bright stroke removed
+    assert out[1][0, 0].tolist() == [100, 100, 100]   # corner untouched
