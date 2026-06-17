@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore")
 
 # Height of the band handed to the model, as a fraction of frame width.
 # Navier-Stokes blend weight (flow model + real-pixel PDE fill).
-_PDE_WEIGHT = 0.6
+_PDE_WEIGHT = 0.7
 _BAND_HEIGHT_RATIO = 3 / 16
 # ProPainter's architecture requires band dimensions divisible by 8.
 _SIZE_MULTIPLE = 8

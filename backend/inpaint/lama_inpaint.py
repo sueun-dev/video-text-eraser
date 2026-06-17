@@ -21,7 +21,7 @@ _PAD_MODULO = 8
 _MINI_BATCH_SIZE = 4
 # Height of the band handed to the model, as a fraction of frame width.
 # Navier-Stokes blend weight; LaMa has no temporal model, so favour the PDE.
-_PDE_WEIGHT = 0.6
+_PDE_WEIGHT = 0.8
 _BAND_HEIGHT_RATIO = 3 / 16
 
 
