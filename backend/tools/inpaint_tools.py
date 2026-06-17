@@ -80,6 +80,38 @@ def refine_box_to_strokes(
     return refined
 
 
+def guided_upsample(restored: np.ndarray, guide: np.ndarray, radius: int = 4,
+                    eps: float = 0.02**2) -> np.ndarray:
+    """Sharpen a blurry fill toward the original's edge structure (He et al. 2013).
+
+    STTN inpaints at 432x240 and the band is bilinearly upscaled ~2x, which
+    smears the real high-frequency detail the fill should carry. A guided filter
+    with the original band as guide re-injects that structure via a local linear
+    model ``q = a*I + b`` (``a,b`` from windowed covariance), restoring texture
+    without a new dependency (pure ``cv2.boxFilter``). It cannot resurrect text:
+    the guide's text edges live where the fill is smooth background, so the local
+    guide/fill covariance there is ~0 and nothing transfers — only structure
+    common to both (the real background) is sharpened.
+    """
+    ksize = (radius * 2 + 1, radius * 2 + 1)
+
+    def box(x: np.ndarray) -> np.ndarray:
+        return np.asarray(cv2.boxFilter(x.astype(np.float32), -1, ksize))  # type: ignore[call-overload]
+
+    guide_gray = cv2.cvtColor(guide, cv2.COLOR_BGR2GRAY).astype(np.float32) / 255.0
+    mean_i = box(guide_gray)
+    var_i = box(guide_gray * guide_gray) - mean_i * mean_i
+    out = np.empty_like(restored, dtype=np.float32)
+    for c in range(restored.shape[2]):
+        p = restored[:, :, c].astype(np.float32) / 255.0
+        mean_p = box(p)
+        cov_ip = box(guide_gray * p) - mean_i * mean_p
+        a = cov_ip / (var_i + eps)
+        b = mean_p - a * mean_i
+        out[:, :, c] = box(a) * guide_gray + box(b)
+    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
+
+
 def composite_band(
     orig_band: np.ndarray,
     restored_band: np.ndarray,

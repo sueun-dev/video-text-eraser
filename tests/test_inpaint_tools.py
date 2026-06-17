@@ -1,5 +1,6 @@
 """Tests for backend.tools.inpaint_tools pure utilities."""
 
+import cv2
 import numpy as np
 
 from backend.config import config
@@ -10,6 +11,7 @@ from backend.tools.inpaint_tools import (
     create_mask,
     expand_frame_ranges,
     get_inpaint_area_by_mask,
+    guided_upsample,
     is_frame_number_in_ab_sections,
     refine_box_to_strokes,
 )
@@ -308,3 +310,41 @@ def test_refine_box_to_strokes_falls_back_when_no_strokes():
     refined = refine_box_to_strokes(flat, box)
     # Degenerate segmentation must fall back to the full box, never erase it.
     assert refined.sum() == box.sum()
+
+
+# --------------------------------------------------------------------------
+# guided_upsample
+# --------------------------------------------------------------------------
+
+
+def test_guided_upsample_preserves_shape_and_dtype():
+    restored = np.random.randint(0, 255, (40, 80, 3), dtype=np.uint8)
+    guide = np.random.randint(0, 255, (40, 80, 3), dtype=np.uint8)
+    out = guided_upsample(restored, guide)
+    assert out.shape == restored.shape
+    assert out.dtype == np.uint8
+
+
+def test_guided_upsample_does_not_inject_guide_only_structure():
+    # A flat fill guided by a frame whose strong edge is absent from the fill
+    # must not grow that edge (the guide/fill covariance is ~0 there).
+    restored = np.full((40, 80, 3), 120, dtype=np.uint8)
+    guide = np.full((40, 80, 3), 120, dtype=np.uint8)
+    guide[:, 40:] = 20  # strong vertical edge only in the guide
+    out = guided_upsample(restored, guide)
+    # The fill stays ~flat; no edge transferred from the guide.
+    assert int(out.max()) - int(out.min()) <= 6
+
+
+def test_guided_upsample_sharpens_shared_structure():
+    # When the fill carries a (blurred) version of the guide's edge, guidance
+    # sharpens it back toward the guide rather than leaving it smooth.
+    guide = np.zeros((40, 80, 3), dtype=np.uint8)
+    guide[:, 40:] = 200
+    blurred = cv2.GaussianBlur(guide, (0, 0), 6)
+    out = guided_upsample(blurred, guide)
+    mid = 40
+    # Edge contrast across the boundary is greater after guided sharpening.
+    before = int(blurred[20, mid + 4, 0]) - int(blurred[20, mid - 4, 0])
+    after = int(out[20, mid + 4, 0]) - int(out[20, mid - 4, 0])
+    assert after >= before

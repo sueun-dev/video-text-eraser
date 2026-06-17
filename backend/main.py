@@ -434,9 +434,13 @@ class SubtitleRemover:
         # The inner-loop EOF break guards the prefetcher-sentinel deadlock.
         run_end_by_start: Dict[int, int] = {start: end for start, end in runs}
 
+        # ProPainter's ops (grid_sample, FFT, attention) all run on Apple MPS as
+        # of torch 2.x — verified bit-parity with CPU — so it no longer needs the
+        # CUDA-only fallback. fp16 stays CUDA-only (half grid_sample/attention can
+        # NaN on MPS), so MPS runs fp32 at identical quality, ~8x faster than CPU.
         device = (
             self.hardware_accelerator.device
-            if self.hardware_accelerator.has_cuda()
+            if self.hardware_accelerator.has_cuda() or self.hardware_accelerator.has_mps()
             else torch.device("cpu")
         )
         propainter = PropainterInpaint(

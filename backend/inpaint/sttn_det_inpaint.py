@@ -16,7 +16,7 @@ from torchvision import transforms
 from backend.config import config
 from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
-from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_band, get_inpaint_area_by_mask, guided_upsample
 
 _compose = transforms.Compose([Stack(), ToTorchFormatTensor()])
 
@@ -76,8 +76,16 @@ class STTNDetInpaint:
 
         for j, frame in enumerate(frames):
             for k, (ymin, ymax, _, _) in enumerate(bands):
-                restored = cv2.resize(restored_bands[k][j], (frame_width, ymax - ymin))
+                # Lanczos preserves more edge energy than bilinear on the ~2x
+                # upscale from the model's 432-wide band to full width.
+                restored = cv2.resize(
+                    restored_bands[k][j], (frame_width, ymax - ymin),
+                    interpolation=cv2.INTER_LANCZOS4,
+                )
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
+                # Re-inject the original band's high-frequency detail lost in the
+                # downscale->upscale round-trip (guide is still the original here).
+                restored = guided_upsample(restored, frame[ymin:ymax, :, :])
                 frame[ymin:ymax, :, :] = composite_band(
                     frame[ymin:ymax, :, :], restored, mask[ymin:ymax, :, :],
                     refine_strokes=True,
