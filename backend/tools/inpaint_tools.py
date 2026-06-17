@@ -130,7 +130,18 @@ def pde_fill_strokes(band: np.ndarray, ink_mask: np.ndarray) -> np.ndarray:
         m = m[:, :, 0]
     if not m.any():
         return band
-    return cv2.inpaint(band, m, 3, cv2.INPAINT_NS)
+    # Biharmonic (thin-plate, ΔΔu=0) continues intensity AND gradient across the
+    # stroke and beats NS on textured backgrounds; its slight per-frame jitter is
+    # absorbed by temporal_fuse_strokes. NS is the fast fallback if unavailable.
+    try:
+        from skimage.restoration import inpaint_biharmonic
+
+        filled = inpaint_biharmonic(
+            band.astype(np.float64) / 255.0, m.astype(bool), channel_axis=-1
+        )
+        return np.clip(filled * 255.0, 0, 255).astype(np.uint8)
+    except Exception:
+        return cv2.inpaint(band, m, 3, cv2.INPAINT_NS)
 
 
 def composite_band(
