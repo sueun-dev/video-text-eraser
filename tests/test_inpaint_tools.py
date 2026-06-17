@@ -425,3 +425,20 @@ def test_composite_run_pde_removes_stroke_and_keeps_background():
     assert len(out) == 3
     assert int(out[1][20, 40, 0]) < 200          # bright stroke removed
     assert out[1][0, 0].tolist() == [100, 100, 100]   # corner untouched
+
+
+def test_refine_box_per_region_contrast():
+    # A box with TWO regions: a crisp high-contrast bar and a faint low-contrast
+    # bar. The crisp region must shrink to its stroke; the faint region must keep
+    # its whole box (so it is fully removed, not under-segmented).
+    band = np.full((60, 240, 3), 120, dtype=np.uint8)
+    band[28:32, 20:80] = 245    # crisp/high-contrast stroke (region A)
+    band[28:32, 160:220] = 132  # faint/low-contrast stroke (region B)
+    box = np.zeros((60, 240), dtype=np.uint8)
+    box[22:38, 10:90] = 1       # region A box
+    box[22:38, 150:230] = 1     # region B box (separated -> distinct component)
+    refined = refine_box_to_strokes(band, box)
+    a = refined[22:38, 10:90]
+    b = refined[22:38, 150:230]
+    assert a.mean() < 0.6        # crisp region tightened to strokes
+    assert b.mean() > 0.95       # faint region kept whole (full removal)

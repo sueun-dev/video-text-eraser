@@ -10,6 +10,9 @@ from backend.tools.constant import Band, Box, FrameRange
 
 # Connected components smaller than this many pixels are treated as noise.
 _MIN_ISLAND_AREA = 10
+# Mean ink response (stroke deviation) below which a text region is too
+# low-contrast for reliable glyph segmentation, so its whole box is removed.
+_LOW_CONTRAST_FLOOR = 70
 
 
 def batch_generator(data: Sequence, max_batch_size: int) -> Iterator[Sequence]:
@@ -65,16 +68,36 @@ def refine_box_to_strokes(
             gray.shape[1] - 1 if gray.shape[1] % 2 == 0 else gray.shape[1])
     k = max(3, k if k % 2 == 1 else k - 1)
     stroke = cv2.absdiff(gray, cv2.medianBlur(gray, k))
-    inside = stroke[box > 0]
-    thr, _ = cv2.threshold(inside.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # Otsu returns the split point T with foreground strictly above it (OpenCV's
-    # THRESH_BINARY semantics); `>=` would swallow the whole background at T=0.
-    ink = (stroke > thr).astype(np.uint8)
-    if dilate:
-        ink = cv2.dilate(ink, np.ones((dilate * 2 + 1, dilate * 2 + 1), np.uint8))
-    refined = np.logical_and(ink, box).astype(np.uint8)
-    # If segmentation collapses (no clear strokes), fall back to the full box so
-    # text is never left behind.
+    # Process each detected text region (connected component of the box)
+    # SEPARATELY: a run's mask can union a crisp subtitle with a faint logo, and
+    # a single global threshold/contrast test would let the logo's weak strokes
+    # be set by the subtitle's strong ones and under-segment the logo. Per region
+    # the threshold adapts and the contrast gate fires only on the faint one.
+    num, labels = cv2.connectedComponents(box)
+    refined = np.zeros_like(box)
+    for lbl in range(1, num):
+        region = (labels == lbl)
+        rstroke = stroke[region]
+        if rstroke.size == 0:
+            continue
+        thr, _ = cv2.threshold(rstroke.reshape(-1, 1), 0, 255,
+                               cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # `>` not `>=`: Otsu returns the split point with the foreground above it.
+        ink = (stroke > thr) & region
+        fg = stroke[ink]
+        # Low mean ink response => low-contrast region (a faint/stylised logo, not
+        # crisp text): the median residual cannot reliably isolate its strokes, so
+        # tightening would leave a ghost. Fill the whole region instead. Crisp text
+        # measures ~100-170, faint logos ~40.
+        if fg.size == 0 or float(fg.mean()) < _LOW_CONTRAST_FLOOR:
+            refined[region] = 1
+            continue
+        rink = ink.astype(np.uint8)
+        if dilate:
+            rink = cv2.dilate(rink, np.ones((dilate * 2 + 1, dilate * 2 + 1), np.uint8))
+        rink = (rink.astype(bool) & region)
+        # If segmentation collapses (no clear strokes), fill the whole region.
+        refined[region if rink.sum() < 0.02 * region.sum() else rink] = 1
     if refined.sum() < 0.02 * box.sum():
         return box
     return refined
