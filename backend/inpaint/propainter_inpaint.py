@@ -104,7 +104,9 @@ class PropainterInpaint:
     ) -> None:
         self.device = device
         self.model_dir = model_dir
-        self.use_half = use_fp16 and device != torch.device("cpu")
+        # fp16 only on CUDA: half-precision grid_sample/attention can NaN on MPS,
+        # so MPS runs fp32 (still ~8x faster than CPU, bit-parity quality).
+        self.use_half = use_fp16 and device.type == "cuda"
         # Maximum frames processed in one sub-video for long inputs.
         self.sub_video_length = sub_video_length
         # Local temporal window size for the transformer.
