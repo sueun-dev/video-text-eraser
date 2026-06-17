@@ -21,7 +21,7 @@ from backend.inpaint.video.core.utils import to_tensors
 from backend.inpaint.video.model.modules.flow_comp_raft import RAFT_bi
 from backend.inpaint.video.model.propainter import InpaintGenerator
 from backend.inpaint.video.model.recurrent_flow_completion import RecurrentFlowCompleteNet
-from backend.tools.inpaint_tools import composite_with_pde, get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_run_pde, get_inpaint_area_by_mask
 
 warnings.filterwarnings("ignore")
 
@@ -365,13 +365,13 @@ class PropainterInpaint:
             del cropped_frames
             gc.collect()
 
-        for j, frame in enumerate(frames):
-            for k, (ymin, ymax, xmin, xmax) in enumerate(bands):
-                orig = frame[ymin:ymax, xmin:xmax, :].copy()
-                # Blend the flow-guided fill with a Navier-Stokes real-background
-                # interpolation of the thin strokes: spatial fidelity + the
-                # model's temporal coherence, with flicker-cancelling averaging.
-                frame[ymin:ymax, xmin:xmax, :] = composite_with_pde(
-                    orig, restored_bands[k][j], mask[ymin:ymax, xmin:xmax, :], _PDE_WEIGHT
-                )
+        for k, (ymin, ymax, xmin, xmax) in enumerate(bands):
+            box = mask[ymin:ymax, xmin:xmax, :]
+            orig_bands = [frame[ymin:ymax, xmin:xmax, :].copy() for frame in frames]
+            model_fills = [restored_bands[k][j] for j in range(len(frames))]
+            # Blend the flow-guided fill with a temporally-fused Navier-Stokes
+            # real-background interpolation of the thin strokes.
+            out_bands = composite_run_pde(orig_bands, model_fills, box, _PDE_WEIGHT)
+            for j, frame in enumerate(frames):
+                frame[ymin:ymax, xmin:xmax, :] = out_bands[j]
         return frames

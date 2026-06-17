@@ -13,7 +13,7 @@ import torch
 from PIL import Image
 
 from backend.inpaint.utils.lama_util import get_image, pad_img_to_modulo, prepare_img_and_mask
-from backend.tools.inpaint_tools import composite_with_pde, get_inpaint_area_by_mask
+from backend.tools.inpaint_tools import composite_run_pde, get_inpaint_area_by_mask
 
 # LaMa's convolutional stack requires inputs padded to a multiple of 8.
 _PAD_MODULO = 8
@@ -115,15 +115,15 @@ class LamaInpaint:
             del cropped_frames, cropped_masks
             gc.collect()
 
-        for j, frame in enumerate(frames):
-            for k, (ymin, ymax, _, _) in enumerate(bands):
-                orig = frame[ymin:ymax, :, :].copy()
-                # LaMa is single-frame and flickers on its own, so lean harder on
-                # the Navier-Stokes real-background fill (it follows the genuine,
-                # temporally-consistent neighbours).
-                frame[ymin:ymax, :, :] = composite_with_pde(
-                    orig, restored_bands[k][j], mask[ymin:ymax, :, :], _PDE_WEIGHT
-                )
+        for k, (ymin, ymax, _, _) in enumerate(bands):
+            box = mask[ymin:ymax, :, :]
+            orig_bands = [frame[ymin:ymax, :, :].copy() for frame in frames]
+            model_fills = [restored_bands[k][j] for j in range(len(frames))]
+            # LaMa is single-frame and flickers on its own, so lean harder on the
+            # temporally-fused Navier-Stokes real-background fill.
+            out_bands = composite_run_pde(orig_bands, model_fills, box, _PDE_WEIGHT)
+            for j, frame in enumerate(frames):
+                frame[ymin:ymax, :, :] = out_bands[j]
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

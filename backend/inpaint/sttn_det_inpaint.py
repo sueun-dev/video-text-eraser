@@ -17,7 +17,7 @@ from backend.config import config
 from backend.inpaint.sttn.network_sttn import InpaintGenerator
 from backend.inpaint.utils.sttn_utils import Stack, ToTorchFormatTensor
 from backend.tools.inpaint_tools import (
-    composite_with_pde,
+    composite_run_pde,
     get_inpaint_area_by_mask,
     guided_upsample,
 )
@@ -81,10 +81,11 @@ class STTNDetInpaint:
                 )
             restored_bands[k] = self.inpaint(scaled_frames, scaled_masks)
 
-        for j, frame in enumerate(frames):
-            for k, (ymin, ymax, _, _) in enumerate(bands):
-                orig = frame[ymin:ymax, :, :].copy()
-                box = mask[ymin:ymax, :, :]
+        for k, (ymin, ymax, _, _) in enumerate(bands):
+            box = mask[ymin:ymax, :, :]
+            orig_bands = [frame[ymin:ymax, :, :].copy() for frame in frames]
+            model_fills = []
+            for j in range(len(frames)):
                 # Lanczos preserves more edge energy than bilinear on the ~2x
                 # upscale from the model's 432-wide band to full width.
                 restored = cv2.resize(
@@ -94,11 +95,13 @@ class STTNDetInpaint:
                 restored = cv2.cvtColor(restored.astype(np.uint8), cv2.COLOR_BGR2RGB)
                 # Re-inject the original band's high-frequency detail lost in the
                 # downscale->upscale round-trip.
-                restored = guided_upsample(restored, orig)
-                # Blend the model fill with a Navier-Stokes interpolation of the
-                # real background under the thin glyph strokes (spatial fidelity +
-                # temporal coherence, with flicker-cancelling averaging).
-                frame[ymin:ymax, :, :] = composite_with_pde(orig, restored, box, _PDE_WEIGHT)
+                model_fills.append(guided_upsample(restored, orig_bands[j]))
+            # Blend the model fill with a temporally-fused Navier-Stokes fill of
+            # the real background under the strokes: spatial fidelity + flow-warped
+            # temporal stability, with no extra model dilution.
+            out_bands = composite_run_pde(orig_bands, model_fills, box, _PDE_WEIGHT)
+            for j, frame in enumerate(frames):
+                frame[ymin:ymax, :, :] = out_bands[j]
         return frames
 
     def _reference_frame_ids(self, neighbor_ids: List[int], length: int) -> List[int]:
