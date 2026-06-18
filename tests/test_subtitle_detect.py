@@ -232,6 +232,46 @@ def test_propagate_empty():
 
 
 # --------------------------------------------------------------------------
+# _drop_isolated_singletons
+# --------------------------------------------------------------------------
+
+def test_drop_isolated_singleton_removed():
+    det = _bare_detector()
+    a = [(345, 662, 596, 824)]   # OCR false positive on one isolated frame
+    run = [(100, 400, 850, 907)]
+    out = det._drop_isolated_singletons({4: a, 73: run, 74: run, 75: run})
+    assert 4 not in out                       # isolated singleton dropped
+    assert sorted(out) == [73, 74, 75]        # real multi-frame run kept
+
+
+def test_drop_keeps_two_frame_run():
+    det = _bare_detector()
+    a = [(0, 10, 0, 5)]
+    out = det._drop_isolated_singletons({10: a, 11: a})
+    assert sorted(out) == [10, 11]            # both have a consecutive neighbour
+
+
+def test_drop_keeps_singleton_inside_a_run():
+    det = _bare_detector()
+    # frame 11 differs but is flanked by neighbours -> not isolated, keep it
+    a = [(0, 10, 0, 5)]
+    b = [(0, 10, 0, 6)]
+    out = det._drop_isolated_singletons({10: a, 11: b, 12: a})
+    assert sorted(out) == [10, 11, 12]
+
+
+def test_drop_singleton_only_video():
+    det = _bare_detector()
+    a = [(0, 10, 0, 5)]
+    # a lone detection in the whole video is left as-is (nothing to compare)
+    assert det._drop_isolated_singletons({7: a}) == {7: a}
+
+
+def test_drop_empty():
+    assert _bare_detector()._drop_isolated_singletons({}) == {}
+
+
+# --------------------------------------------------------------------------
 # _choose_sample_step (reads only fps from a real tiny video)
 # --------------------------------------------------------------------------
 
