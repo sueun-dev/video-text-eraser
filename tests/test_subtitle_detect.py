@@ -178,6 +178,60 @@ def test_interpolate_empty():
 
 
 # --------------------------------------------------------------------------
+# _same_caption_block / _propagate_within_spans
+# (boxes are (xmin, xmax, ymin, ymax))
+# --------------------------------------------------------------------------
+
+# Two centred lines stacked with a 7px gap — one caption.
+_UPPER = (100, 400, 850, 907)
+_LOWER = (120, 380, 914, 963)
+# Text 100+px above the caption (e.g. a sign) — not part of the block.
+_SCENE = (150, 300, 620, 735)
+
+
+def test_same_caption_block_stacked_lines():
+    assert SubtitleDetect._same_caption_block(_UPPER, _LOWER) is True
+
+
+def test_same_caption_block_rejects_far_apart():
+    assert SubtitleDetect._same_caption_block(_UPPER, _SCENE) is False
+
+
+def test_same_caption_block_rejects_no_horizontal_overlap():
+    left = (100, 200, 850, 907)
+    right = (400, 500, 914, 963)  # vertically adjacent but x-disjoint
+    assert SubtitleDetect._same_caption_block(left, right) is False
+
+
+def test_propagate_fills_missing_caption_line():
+    det = _bare_detector()
+    # Frame 2 dropped the upper line; it must be restored from its neighbours.
+    out = det._propagate_within_spans({1: [_UPPER, _LOWER], 2: [_LOWER], 3: [_UPPER, _LOWER]})
+    assert _UPPER in out[2] and _LOWER in out[2]
+    # Canonical (sorted) order keeps all three frames one identical-mask run.
+    assert out[1] == out[2] == out[3] == sorted([_UPPER, _LOWER])
+
+
+def test_propagate_leaves_scene_text_frame_local():
+    det = _bare_detector()
+    out = det._propagate_within_spans({1: [_UPPER], 2: [_UPPER, _SCENE], 3: [_UPPER]})
+    assert _SCENE in out[2]          # kept where actually detected
+    assert _SCENE not in out[1]      # not smeared onto clean neighbours
+    assert _SCENE not in out[3]
+
+
+def test_propagate_does_not_cross_gap():
+    det = _bare_detector()
+    # Frames 1 and 10 are separate spans; the upper line must not jump the gap.
+    out = det._propagate_within_spans({1: [_LOWER], 10: [_UPPER, _LOWER]})
+    assert out[1] == [_LOWER]
+
+
+def test_propagate_empty():
+    assert _bare_detector()._propagate_within_spans({}) == {}
+
+
+# --------------------------------------------------------------------------
 # _choose_sample_step (reads only fps from a real tiny video)
 # --------------------------------------------------------------------------
 

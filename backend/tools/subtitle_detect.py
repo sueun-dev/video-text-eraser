@@ -137,9 +137,76 @@ class SubtitleDetect:
 
         frame_boxes = self._interpolate_samples(sampled)
         frame_boxes = self.unify_regions(frame_boxes)
+        frame_boxes = self._propagate_within_spans(frame_boxes)
         if sub_remover:
             sub_remover.append_output(tr["Main"]["FinishedFindingSubtitles"])
         return {no: boxes for no, boxes in frame_boxes.items() if boxes}
+
+    def _propagate_within_spans(self, frame_boxes: FrameBoxes) -> FrameBoxes:
+        """Fill in a caption line that OCR caught on only some frames of a run.
+
+        A multi-line subtitle often has one line drop out of detection on a few
+        frames (PaddleOCR recall jitter), leaving that line un-masked and so
+        surviving as a ghost. Within a gap-free run of subtitled frames the lines
+        of one caption belong together, so a line seen elsewhere in the run is
+        added to a frame that is missing it — but only when it is part of the
+        *same caption block*: horizontally overlapping and vertically abutting a
+        line already on that frame (see :meth:`_same_caption_block`).
+
+        The block test is what makes this safe. Text at a different screen
+        position (a sign, a logo, a higher title line) is *not* vertically
+        adjacent to the caption, so it stays frame-local and we never inpaint a
+        region that genuinely had no text on that frame.
+        """
+        if not frame_boxes:
+            return frame_boxes
+        numbers = sorted(frame_boxes.keys())
+        out: FrameBoxes = {}
+        i = 0
+        while i < len(numbers):
+            j = i
+            while j + 1 < len(numbers) and numbers[j + 1] - numbers[j] == 1:
+                j += 1
+            candidates: List[Box] = []
+            for frame_no in numbers[i:j + 1]:
+                for box in frame_boxes[frame_no]:
+                    if not any(self.are_similar(box, c) for c in candidates):
+                        candidates.append(box)
+            for frame_no in numbers[i:j + 1]:
+                boxes = list(frame_boxes[frame_no])
+                changed = True
+                while changed:  # transitive: line A pulls in B, B pulls in C
+                    changed = False
+                    for cand in candidates:
+                        if any(self.are_similar(cand, b) for b in boxes):
+                            continue
+                        if any(self._same_caption_block(cand, b) for b in boxes):
+                            boxes.append(cand)
+                            changed = True
+                # Canonical order so frames carrying the same box set compare
+                # equal in find_continuous_ranges_with_same_mask and stay one run.
+                out[frame_no] = sorted(boxes)
+            i = j + 1
+        return out
+
+    @staticmethod
+    def _same_caption_block(a: Box, b: Box) -> bool:
+        """Whether two boxes are stacked lines of one caption.
+
+        True when they horizontally overlap (allowing detector jitter) and the
+        vertical gap between them is under ~0.7 of the shorter line's height —
+        i.e. lines sitting directly above/below each other. The shorter line
+        sets the scale so a tall unrelated detection cannot inflate the gate.
+        """
+        axmin, axmax, aymin, aymax = a
+        bxmin, bxmax, bymin, bymax = b
+        tol_x = config.subtitleAreaPixelToleranceXPixel.value
+        horizontal_overlap = min(axmax, bxmax) - max(axmin, bxmin)
+        if horizontal_overlap < -tol_x:
+            return False
+        vertical_gap = max(aymin, bymin) - min(aymax, bymax)
+        shorter_line = min(aymax - aymin, bymax - bymin)
+        return vertical_gap <= 0.7 * shorter_line
 
     def _interpolate_samples(self, sampled: FrameBoxes) -> FrameBoxes:
         """Mark frames between two nearby positive samples as subtitled too."""
