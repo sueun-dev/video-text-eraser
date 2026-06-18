@@ -6,6 +6,7 @@ import numpy as np
 from backend.config import config
 from backend.tools.inpaint_tools import (
     _align_to_multiple,
+    _stroke_dilation_radius,
     batch_generator,
     composite_band,
     create_mask,
@@ -304,6 +305,45 @@ def test_refine_strokes_preserves_background_between_letters():
     assert out[30, 33].tolist() == [120, 120, 120]    # left of the stroke, in box
     # The stroke itself is replaced by the fill.
     assert int(out[30, 100, 0]) < 120
+
+
+def _radius_scene(bg_value_fn):
+    """A box with a small stroke and plenty of background, painted by bg_value_fn."""
+    h, w = 90, 240
+    region = np.zeros((h, w), dtype=bool)
+    region[10:80, 20:220] = True              # the OCR box
+    ink = np.zeros((h, w), dtype=np.uint8)
+    ink[40:50, 110:130] = 1                   # one small stroke, lots of bg around
+    gray = bg_value_fn((h, w)).astype(np.float32)
+    return ink, gray, region
+
+
+def test_stroke_dilation_radius_grows_on_smooth_background():
+    # Smooth (even) background: dilate out past the drop-shadow.
+    ink, gray, region = _radius_scene(lambda s: np.full(s, 100, np.float32))
+    r = _stroke_dilation_radius(ink, gray, region, base=3)
+    assert 3 < r <= 9                         # grown, capped at 3x base
+
+
+def test_stroke_dilation_radius_stays_tight_on_textured_background():
+    # Busy background: keep the tight base margin (a wider fill would smear it).
+    def textured(shape):
+        g = np.full(shape, 100, np.float32)
+        g[::2, ::2] = 200
+        g[1::2, 1::2] = 10
+        return g
+    ink, gray, region = _radius_scene(textured)
+    assert _stroke_dilation_radius(ink, gray, region, base=3) == 3
+
+
+def test_stroke_dilation_radius_base_when_no_ink_or_no_background():
+    h, w = 90, 240
+    region = np.ones((h, w), dtype=bool)
+    gray = np.full((h, w), 100, np.float32)
+    # No ink at all -> base.
+    assert _stroke_dilation_radius(np.zeros((h, w), np.uint8), gray, region, base=3) == 3
+    # Ink fills the whole region -> no background to measure -> base.
+    assert _stroke_dilation_radius(np.ones((h, w), np.uint8), gray, region, base=3) == 3
 
 
 def test_refine_box_to_strokes_falls_back_when_no_strokes():

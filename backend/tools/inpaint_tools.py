@@ -39,6 +39,41 @@ def batch_generator(data: Sequence, max_batch_size: int) -> Iterator[Sequence]:
         yield data[remainder_start:]
 
 
+def _stroke_dilation_radius(
+    ink: np.ndarray, gray: np.ndarray, region: np.ndarray, base: int
+) -> int:
+    """How far to grow a stroke mask, set by the smoothness of the background.
+
+    A glyph is rendered with a soft anti-aliased drop-shadow/outline that fades
+    several pixels past the bright core. If the mask stops at the core, the fill
+    interpolates from that surrounding *shadow* and reproduces a dark, readable
+    ghost of the text (worst on bold captions over a dark, even background). The
+    cure is to dilate the mask out past the shadow so the fill samples true
+    background — but a blanket wide dilation would smear a *textured* background
+    into a smooth halo where the text used to be.
+
+    So scale the dilation to the local background texture, measured as the
+    std-dev of the band beyond the shadow zone (``region`` minus a 9px collar
+    around the ink):
+
+    - Smooth background (low std): the ghost is both most visible and safest to
+      over-fill (a flat fill matches a flat background), so dilate out to ``3x
+      base``.
+    - Textured background (high std): keep the tight ``base`` margin — the wider
+      fill would smear the texture, and the shadow ghost is largely hidden by the
+      texture anyway.
+    """
+    if not ink.any():
+        return base
+    collar = cv2.dilate(ink, np.ones((19, 19), np.uint8)) > 0
+    background = region & ~collar
+    if int(background.sum()) < 64:
+        return base
+    bg_std = float(gray[background].std())
+    smooth = float(np.clip((30.0 - bg_std) / 30.0, 0.0, 1.0))
+    return int(round(base + smooth * 2 * base))
+
+
 def refine_box_to_strokes(
     orig_band: np.ndarray, box_mask: np.ndarray, dilate: int = 3
 ) -> np.ndarray:
@@ -94,7 +129,8 @@ def refine_box_to_strokes(
             continue
         rink = ink.astype(np.uint8)
         if dilate:
-            rink = cv2.dilate(rink, np.ones((dilate * 2 + 1, dilate * 2 + 1), np.uint8))
+            radius = _stroke_dilation_radius(rink, gray, region, dilate)
+            rink = cv2.dilate(rink, np.ones((radius * 2 + 1, radius * 2 + 1), np.uint8))
         rink = (rink.astype(bool) & region)
         # If segmentation collapses (no clear strokes), fill the whole region.
         refined[region if rink.sum() < 0.02 * region.sum() else rink] = 1
