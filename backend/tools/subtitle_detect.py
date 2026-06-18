@@ -136,11 +136,36 @@ class SubtitleDetect:
         video_cap.release()
 
         frame_boxes = self._interpolate_samples(sampled)
+        frame_boxes = self._drop_isolated_singletons(frame_boxes)
         frame_boxes = self.unify_regions(frame_boxes)
         frame_boxes = self._propagate_within_spans(frame_boxes)
         if sub_remover:
             sub_remover.append_output(tr["Main"]["FinishedFindingSubtitles"])
         return {no: boxes for no, boxes in frame_boxes.items() if boxes}
+
+    def _drop_isolated_singletons(self, frame_boxes: FrameBoxes) -> FrameBoxes:
+        """Drop a detection that survives on a single isolated frame.
+
+        A readable subtitle persists for many frames, so after interpolation it
+        spans a multi-frame run of consecutive frames. A box left on exactly one
+        frame with neither neighbour present is almost always an OCR false
+        positive on scene content (a face, an object, furniture). Left in, it is
+        harmful out of proportion to its one frame: ``filter_and_merge_intervals``
+        widens its single-frame run to STTN's reference length, so the bogus mask
+        is inpainted across several *clean* neighbouring frames and smears them.
+        A genuine one-frame subtitle is not readable, so removing these costs no
+        real text while preventing the smear.
+        """
+        if len(frame_boxes) < 2:
+            return frame_boxes
+        numbers = sorted(frame_boxes)
+        kept: FrameBoxes = {}
+        for index, frame_no in enumerate(numbers):
+            has_prev = index > 0 and frame_no - numbers[index - 1] == 1
+            has_next = index < len(numbers) - 1 and numbers[index + 1] - frame_no == 1
+            if has_prev or has_next:
+                kept[frame_no] = frame_boxes[frame_no]
+        return kept
 
     def _propagate_within_spans(self, frame_boxes: FrameBoxes) -> FrameBoxes:
         """Fill in a caption line that OCR caught on only some frames of a run.
