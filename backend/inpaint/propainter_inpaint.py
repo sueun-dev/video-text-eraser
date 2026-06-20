@@ -27,7 +27,16 @@ warnings.filterwarnings("ignore")
 
 # Height of the band handed to the model, as a fraction of frame width.
 # Navier-Stokes blend weight (flow model + real-pixel PDE fill).
-_PDE_WEIGHT = 0.7
+#
+# Lower than the other modes on purpose. Unlike LaMa/STTN, ProPainter is a
+# flow-based *temporal* inpainter: when the background moves behind a static
+# caption it recovers the real pixels from neighbouring frames. The PDE fill, by
+# contrast, only interpolates within a frame and so smears a textured background
+# into a smooth, blurry patch. Leaning on ProPainter (0.3) lets its real-texture
+# reconstruction show through instead of the PDE blur, at a small, temporally
+# consistent flicker cost (measured). The PDE still contributes spatial fidelity
+# on thin strokes and stabilises frames the flow cannot reconstruct.
+_PDE_WEIGHT = 0.3
 _BAND_HEIGHT_RATIO = 3 / 16
 # ProPainter's architecture requires band dimensions divisible by 8.
 _SIZE_MULTIPLE = 8
