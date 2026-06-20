@@ -382,3 +382,7 @@ tests/**/__pycache__/
 inference.onnx
 /config/config.json
 webapp/data/
+
+# Local validation artifacts / tool caches (not part of the repo)
+vsr_val/
+.codeatlas/
