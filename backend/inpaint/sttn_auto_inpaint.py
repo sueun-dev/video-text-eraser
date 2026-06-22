@@ -176,7 +176,9 @@ class STTNAutoInpaint:
     def _effective_clip_gap(self, width: int, height: int) -> int:
         """Shrink the chunk size when available VRAM cannot hold it."""
         vram_mb = HardwareAccelerator.instance().get_available_vram_mb()
-        if vram_mb <= 0:
+        if vram_mb <= 0 or width <= 0 or height <= 0:
+            # No GPU budget to enforce, or a source reporting 0x0 dimensions
+            # (corrupt metadata) — the divide below would be a ZeroDivisionError.
             return self.clip_gap
         bytes_per_frame = width * height * _BYTES_PER_PIXEL_BUDGET
         max_frames = max(int(vram_mb * 1024 * 1024 / bytes_per_frame), 10)

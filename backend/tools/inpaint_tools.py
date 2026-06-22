@@ -473,6 +473,15 @@ def _align_to_multiple(
         elif height > multiple:
             ymax = ymin + height - remainder
 
+    # Guard: if none of the centering branches could make the height a multiple
+    # (a degenerate band only a few px tall pinned against both frame edges), grow
+    # to the next multiple within the frame so a non-conforming crop — which the
+    # model's divisible-by-`multiple` requirement rejects — can never reach it.
+    if (ymax - ymin) % multiple != 0:
+        target = ((ymax - ymin) // multiple + 1) * multiple
+        ymax = min(ymin + target, frame_height)
+        ymin = max(0, ymax - target)
+
     width = xmax - xmin
     remainder_w = width % multiple
     if remainder_w != 0:

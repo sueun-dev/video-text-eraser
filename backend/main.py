@@ -195,7 +195,9 @@ class SubtitleRemover:
         ):
             self.append_output(tr["Main"]["DirectMLWarning"])
 
-        os.makedirs(os.path.dirname(self.video_out_path), exist_ok=True)
+        # dirname is "" for a bare filename (output into the CWD); makedirs("")
+        # raises, so fall back to ".".
+        os.makedirs(os.path.dirname(self.video_out_path) or ".", exist_ok=True)
         self.progress_total = 0
         tbar = tqdm(
             total=int(self.frame_count), unit="frame", position=0,
@@ -390,23 +392,36 @@ class SubtitleRemover:
 
             run_start, run_end = frame_index, run_end_by_start[frame_index]
             tbar.write(f"processing frame {run_start} to {run_end}")
-            run_frames = [frame]
+            mask = create_mask(
+                self.mask_size, self._collect_run_boxes(frame_boxes, run_start, run_end)
+            )
+            # Process the run in bounded windows rather than materialising every
+            # frame first: a (near-)continuous subtitle collapses into a single
+            # run spanning the whole clip, and holding thousands of full-res BGR
+            # frames at once can exhaust RAM. The model only ever sees
+            # getSttnMaxLoadNum frames per call, so reading a window at a time is
+            # output-equivalent while bounding memory to one batch.
+            window = max(2, config.getSttnMaxLoadNum())
+            batch = [frame]
+            remaining = run_end - run_start
             eof = False
-            for _ in range(run_end - run_start):
-                ret, frame = reader.read()
-                if not ret:
-                    eof = True
-                    break
-                frame_index += 1
-                run_frames.append(frame)
-
-            mask = create_mask(self.mask_size, self._collect_run_boxes(frame_boxes, run_start, run_end))
-            for batch in batch_generator(run_frames, config.getSttnMaxLoadNum()):
+            while True:
+                while len(batch) < window and remaining > 0:
+                    ret, frame = reader.read()
+                    if not ret:
+                        eof = True
+                        break
+                    frame_index += 1
+                    remaining -= 1
+                    batch.append(frame)
                 inpainted_frames = model(batch, mask)
                 for original, inpainted in zip(batch, inpainted_frames):
                     self.video_writer.write(inpainted)
                     self._preview_masked(original, mask, inpainted)
                 self.update_progress(tbar, increment=len(batch))
+                batch = []
+                if eof or remaining <= 0:
+                    break
             # If the inner read hit EOF, the prefetcher's sole sentinel is spent;
             # reading again in the outer loop would block forever.
             if eof:
@@ -550,17 +565,19 @@ class SubtitleRemover:
                 self._finalize_merge(audio_temp)
                 return
 
-        if os.path.exists(audio_temp.name):
-            try:
-                os.remove(audio_temp.name)
-            except Exception:
-                pass
         self.is_successful_merged = True
         self._finalize_merge(audio_temp)
 
     def _finalize_merge(self, audio_temp) -> None:
         """If muxing failed, ship the silent video rather than nothing."""
         audio_temp.close()
+        # delete=False means close() leaves the .aac on disk; remove it on every
+        # path (success and both failure returns) or it leaks into the temp dir.
+        if os.path.exists(audio_temp.name):
+            try:
+                os.remove(audio_temp.name)
+            except Exception:
+                pass
         if not self.is_successful_merged:
             try:
                 shutil.copy2(self.video_temp_file.name, self.video_out_path)
@@ -573,6 +590,12 @@ class SubtitleRemover:
         self.video_temp_file.close()
 
     def _remove_temp_file(self) -> None:
+        # The picture path never reaches _finalize_merge, so close the handle
+        # opened in __init__ here before unlinking (idempotent on the video path).
+        try:
+            self.video_temp_file.close()
+        except Exception:
+            pass
         if os.path.exists(self.video_temp_file.name):
             try:
                 os.remove(self.video_temp_file.name)

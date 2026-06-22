@@ -118,22 +118,27 @@ class SubtitleDetect:
         ab_sections = sub_remover.ab_sections if sub_remover else None
         sampled: FrameBoxes = {}
         frame_no = 0
-        while video_cap.isOpened():
-            ret, frame = video_cap.read()
-            if not ret:
-                break
-            frame_no += 1
-            if not is_frame_number_in_ab_sections(frame_no - 1, ab_sections):
+        # detect_subtitle runs PaddleOCR, which can raise mid-scan (OOM, a corrupt
+        # frame, a runtime error); release the capture and bar regardless.
+        try:
+            while video_cap.isOpened():
+                ret, frame = video_cap.read()
+                if not ret:
+                    break
+                frame_no += 1
+                if not is_frame_number_in_ab_sections(frame_no - 1, ab_sections):
+                    tbar.update(1)
+                    continue
+                if (frame_no - 1) % self.sample_step == 0:
+                    boxes = self.detect_subtitle(frame)
+                    if boxes:
+                        sampled[frame_no] = boxes
                 tbar.update(1)
-                continue
-            if (frame_no - 1) % self.sample_step == 0:
-                boxes = self.detect_subtitle(frame)
-                if boxes:
-                    sampled[frame_no] = boxes
-            tbar.update(1)
-            if sub_remover:
-                sub_remover.progress_total = (100 * frame_no / frame_count) // 2
-        video_cap.release()
+                if sub_remover:
+                    sub_remover.progress_total = (100 * frame_no / frame_count) // 2
+        finally:
+            video_cap.release()
+            tbar.close()
 
         frame_boxes = self._interpolate_samples(sampled)
         frame_boxes = self._drop_isolated_singletons(frame_boxes)
@@ -291,6 +296,8 @@ class SubtitleDetect:
         A run breaks on a frame-number gap or whenever the box layout changes,
         so each run can be inpainted with a single mask.
         """
+        if not frame_boxes:
+            return []
         numbers = sorted(frame_boxes.keys())
         ranges: List[FrameRange] = []
         start = numbers[0]
