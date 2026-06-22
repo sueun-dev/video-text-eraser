@@ -79,23 +79,27 @@ def analyze_region_motion(
     reported as static (single-frame inputs go to LaMa anyway).
     """
     cap = cv2.VideoCapture(video_path)
-    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if frame_count < 2:
-        cap.release()
-        return _motion_result(True, 0.0, 0.0)
-
-    indices = np.linspace(0, frame_count - 1, min(samples, frame_count), dtype=int)
     crops, frames = [], []
-    for idx in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
-        ok, frame = cap.read()
-        if not ok:
-            continue
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
-        frames.append(cv2.resize(gray, (160, 90)))
-        region = [gray[y1:y2, x1:x2] for y1, y2, x1, x2 in areas]
-        crops.append(region)
-    cap.release()
+    # try/finally: a cvtColor/resize/crop on a malformed frame can raise mid-loop;
+    # release the decoder regardless. A single-frame or unreadable source leaves
+    # frames empty and falls through to the len(frames) < 2 check below.
+    try:
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if frame_count >= 2:
+            indices = np.linspace(
+                0, frame_count - 1, min(samples, frame_count), dtype=int
+            )
+            for idx in indices:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, int(idx))
+                ok, frame = cap.read()
+                if not ok:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).astype(np.float32)
+                frames.append(cv2.resize(gray, (160, 90)))
+                region = [gray[y1:y2, x1:x2] for y1, y2, x1, x2 in areas]
+                crops.append(region)
+    finally:
+        cap.release()
 
     if len(frames) < 2:
         return _motion_result(True, 0.0, 0.0)
@@ -178,6 +182,12 @@ def remove_regions_video(
     silent_temp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
     silent_temp.close()
     writer = make_video_writer(silent_temp.name, fps, (width, height))
+    # An unopened cv2.VideoWriter (odd-dimension fallback, codec missing)
+    # silently no-ops every write() and would ship a 0-byte output as "success".
+    if isinstance(writer, cv2.VideoWriter) and not writer.isOpened():
+        raise RuntimeError(
+            f"could not open a video writer for {width}x{height} @ {fps}fps"
+        )
 
     reader = FramePrefetcher(cap)
     done = 0

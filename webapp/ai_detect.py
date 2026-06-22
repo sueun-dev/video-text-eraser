@@ -83,10 +83,11 @@ def _parse_boxes(text: str) -> List[DetectedBox]:
         if isinstance(candidate, dict) and "boxes" in candidate:
             payload = candidate
             break
-        if payload is None and isinstance(candidate, dict):
-            payload = candidate  # fall back to the first object if none has "boxes"
     if payload is None:
-        raise ValueError(f"no JSON object in model reply: {text[:200]!r}")
+        # Require the documented {"boxes": [...]} shape. Falling back to some
+        # other JSON object would make payload.get("boxes", []) silently report
+        # zero detections and hide a malformed/refused reply.
+        raise ValueError(f"no JSON object with a 'boxes' key in model reply: {text[:200]!r}")
     boxes: List[DetectedBox] = []
     for box in payload.get("boxes", []):
         try:
@@ -179,7 +180,14 @@ def detect_openai(
     if response.status_code != 200:
         raise RuntimeError(f"OpenAI API {response.status_code}: {response.text[:300]}")
     choices = response.json().get("choices", [])
-    text = choices[0]["message"]["content"] if choices else ""
+    if not choices:
+        raise RuntimeError("OpenAI returned no choices")
+    # content is null for refusals / tool-call replies; surface the reason rather
+    # than passing None into _parse_boxes (which would TypeError on len(None)).
+    text = (choices[0].get("message") or {}).get("content") or ""
+    if not text:
+        reason = choices[0].get("finish_reason", "unknown")
+        raise RuntimeError(f"OpenAI returned no text content (finish_reason={reason})")
     return _parse_boxes(text)
 
 

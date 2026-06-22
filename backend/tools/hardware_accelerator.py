@@ -144,7 +144,6 @@ class HardwareAccelerator:
                 try:
                     import torch_directml
                     return torch_directml.device(torch_directml.default_device())
-                    self.__dml = True
                 except Exception:
                     traceback.print_exc()
                     self.__dml = False
